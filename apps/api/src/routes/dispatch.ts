@@ -233,7 +233,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { data: ticket, error: ticketError } = await adminClient
         .from("tickets")
-        .select("id, ticket_number, customer_account_id, customer_site_id, asset_id, status")
+        .select("id, ticket_number, customer_account_id, site_id, asset_id, status")
         .eq("tenant_id", tenantId)
         .eq("id", ticketId)
         .single();
@@ -268,7 +268,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
           ticket_id: ticketId,
           technician_id: technicianId,
           customer_account_id: ticket.customer_account_id,
-          customer_site_id: ticket.customer_site_id,
+          customer_site_id: ticket.site_id,
           asset_id: ticket.asset_id,
           status: "assigned",
           priority,

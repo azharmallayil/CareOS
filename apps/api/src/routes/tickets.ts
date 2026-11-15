@@ -404,8 +404,8 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify) => {
         `
         *,
         customer_accounts ( id, name, account_number, email, phone ),
-        customer_sites ( id, name, city, address_line_1, latitude, longitude ),
-        customer_contacts ( id, full_name, email, phone, role_title ),
+        customer_sites ( id, name, city, address_line1, latitude, longitude ),
+        customer_contacts ( id, full_name, email, phone, job_title ),
         assets ( id, name, asset_tag, fleet_number, vin, make, model, operational_status ),
         ticket_categories ( id, name, code, default_priority, sla_response_hours, sla_resolution_hours )
       `

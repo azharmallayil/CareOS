@@ -3,9 +3,9 @@ import Fastify from "fastify";
 import { buildApp } from "./app.js";
 
 const server = Fastify({
-  connectionTimeout: 15000,
-  requestTimeout: 30000,
-  keepAliveTimeout: 5000,
+  connectionTimeout: 60000,
+  requestTimeout: 60000,
+  keepAliveTimeout: 10000,
   logger: {
     level: process.env["LOG_LEVEL"] ?? "info",
     ...(process.env["NODE_ENV"] !== "production" && {

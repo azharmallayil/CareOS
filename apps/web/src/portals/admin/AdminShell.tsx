@@ -28,7 +28,7 @@ export function AdminShell({ children }: AdminShellProps) {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/login");
+    navigate("/login?portal=admin");
   };
 
   const navItems = [

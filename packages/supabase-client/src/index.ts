@@ -7,14 +7,19 @@ import { createServerClient as _createServerClient } from "@supabase/ssr";
  * Create a Supabase client for browser usage.
  * Uses the anon key; authentication is via the user's JWT session.
  */
-export function createBrowserClient(supabaseUrl: string, supabaseAnonKey: string) {
+export function createBrowserClient(
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+  options?: { storageKey?: string; storage?: any }
+) {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       flowType: "pkce",
       autoRefreshToken: true,
       detectSessionInUrl: true,
       persistSession: true,
-      storageKey: "careos-auth",
+      storageKey: options?.storageKey ?? "careos-auth",
+      ...(options?.storage ? { storage: options.storage } : {}),
     },
   });
 }

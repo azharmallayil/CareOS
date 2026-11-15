@@ -37,7 +37,7 @@ export function TechnicianShell({ children }: TechnicianShellProps) {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/login");
+    navigate("/login?portal=technician");
   };
 
   const statusConfigs = {

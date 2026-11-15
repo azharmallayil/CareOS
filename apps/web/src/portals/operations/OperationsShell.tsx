@@ -61,7 +61,7 @@ export function OperationsShell({ children }: OperationsShellProps) {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/login");
+    navigate("/login?portal=operations");
   };
 
   const navItems = [

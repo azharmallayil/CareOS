@@ -32,7 +32,7 @@ export function CustomerShell({ children }: CustomerShellProps) {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/login");
+    navigate("/login?portal=customer");
   };
 
   const navItems = [

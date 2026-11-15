@@ -17,7 +17,7 @@ export default defineConfig({
     proxy: {
       // Proxy API calls to the Fastify server in development
       "/api": {
-        target: "http://localhost:3000",
+        target: "http://127.0.0.1:3000",
         changeOrigin: true,
       },
     },

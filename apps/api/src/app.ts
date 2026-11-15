@@ -34,6 +34,7 @@ import { searchRoutes } from "./routes/search.js";
 import { reportRoutes } from "./routes/reports.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { aiRoutes } from "./routes/ai.js";
+import { adminRoutes } from "./routes/admin.js";
 
 export async function buildApp(app: FastifyInstance): Promise<FastifyInstance> {
   // ── Security headers ───────────────────────────────────────────────────────
@@ -175,6 +176,7 @@ export async function buildApp(app: FastifyInstance): Promise<FastifyInstance> {
   await app.register(reportRoutes, { prefix: "/api/v1/reports" });
   await app.register(knowledgeRoutes, { prefix: "/api/v1/knowledge" });
   await app.register(aiRoutes, { prefix: "/api/v1/ai" });
+  await app.register(adminRoutes, { prefix: "/api/v1/admin" });
 
   // ── 404 handler with SPA fallback for Hostinger ────────────────────────────
   app.setNotFoundHandler((req, reply) => {

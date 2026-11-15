@@ -82,28 +82,39 @@ function PlatformTenantsDirectory() {
     setSlug(autoSlug);
   };
 
-  const fetchTenants = () => {
+  const fetchTenants = async () => {
     if (!session?.access_token) return;
     setIsLoading(true);
     setErrorMsg(null);
 
-    fetch("/api/v1/admin/tenants", {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        "Content-Type": "application/json",
-      },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch tenants`);
-        return res.json();
-      })
-      .then((payload) => {
-        if (Array.isArray(payload.data)) {
-          setTenants(payload.data);
-        }
-      })
-      .catch((err) => setErrorMsg(err.message))
-      .finally(() => setIsLoading(false));
+    try {
+      const res = await fetch("/api/v1/admin/tenants", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const rawText = await res.text();
+      let payload: any = null;
+      try {
+        payload = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        // ignore
+      }
+
+      if (!res.ok) {
+        throw new Error(payload?.error?.message || `HTTP ${res.status}: Failed to fetch tenants`);
+      }
+
+      if (payload && Array.isArray(payload.data)) {
+        setTenants(payload.data);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -133,10 +144,23 @@ function PlatformTenantsDirectory() {
         }),
       });
 
-      const json = await res.json();
+      const rawText = await res.text();
+      let json: any = null;
+      try {
+        json = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        // ignore
+      }
 
       if (!res.ok) {
-        throw new Error(json.error?.message || "Failed to create telematics company");
+        throw new Error(
+          json?.error?.message ||
+          (rawText && rawText.length < 200 ? rawText : `Server error (${res.status} ${res.statusText})`)
+        );
+      }
+
+      if (!json?.data) {
+        throw new Error("Invalid response received from server");
       }
 
       setCreationResult(json.data);

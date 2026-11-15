@@ -125,20 +125,20 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.escalation_history TO authenticat
 -- Operations policies
 CREATE POLICY "operations_contract_entitlements_all"
   ON public.contract_entitlements FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_sla_policies_all"
   ON public.sla_policies FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_sla_instances_all"
   ON public.sla_instances FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_escalation_rules_all"
   ON public.escalation_rules FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_escalation_history_all"
   ON public.escalation_history FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));

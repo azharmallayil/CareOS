@@ -195,7 +195,7 @@ CREATE POLICY "operations_evidence_reqs_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -206,7 +206,7 @@ CREATE POLICY "operations_evidence_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -229,7 +229,7 @@ CREATE POLICY "operations_bulk_requests_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -240,7 +240,7 @@ CREATE POLICY "operations_bulk_items_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );

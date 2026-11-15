@@ -333,7 +333,7 @@ CREATE POLICY "operations_service_territories_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -344,7 +344,7 @@ CREATE POLICY "operations_technicians_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -355,7 +355,7 @@ CREATE POLICY "operations_technician_skills_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -366,7 +366,7 @@ CREATE POLICY "operations_technician_territories_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -377,7 +377,7 @@ CREATE POLICY "operations_technician_working_hours_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -388,7 +388,7 @@ CREATE POLICY "operations_technician_availability_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -399,7 +399,7 @@ CREATE POLICY "operations_work_orders_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -410,7 +410,7 @@ CREATE POLICY "operations_work_order_stages_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -421,7 +421,7 @@ CREATE POLICY "operations_work_order_tasks_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -432,7 +432,7 @@ CREATE POLICY "operations_work_order_checklists_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -443,7 +443,7 @@ CREATE POLICY "operations_service_visits_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -454,7 +454,7 @@ CREATE POLICY "operations_technician_assignment_history_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );
@@ -465,7 +465,7 @@ CREATE POLICY "operations_technician_location_pings_all"
   TO authenticated
   USING (
     tenant_id IN (
-      SELECT m.tenant_id FROM public.memberships m
+      SELECT m.tenant_id FROM public.tenant_memberships m
       WHERE m.user_id = auth.uid()
     )
   );

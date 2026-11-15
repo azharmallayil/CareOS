@@ -128,13 +128,13 @@ CREATE POLICY "Tenant operations users manage integration connections"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -145,13 +145,13 @@ CREATE POLICY "Tenant members access external id mappings"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -162,13 +162,13 @@ CREATE POLICY "Tenant members access field mappings"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -179,13 +179,13 @@ CREATE POLICY "Tenant members access inbound inbox"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -196,13 +196,13 @@ CREATE POLICY "Tenant members access outbound outbox"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -213,7 +213,7 @@ CREATE POLICY "Tenant members view sync logs"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );

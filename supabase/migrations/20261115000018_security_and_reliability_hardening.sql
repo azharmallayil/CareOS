@@ -27,7 +27,7 @@ CREATE POLICY "tenant_admins_read_webhook_events"
       JOIN public.membership_roles mr ON mr.membership_id = tm.id
       JOIN public.roles r ON r.id = mr.role_id
       WHERE tm.user_id = auth.uid()
-        AND tm.status = 'active'
+        AND tm.is_active = true
         AND r.name IN ('Platform Admin', 'Tenant Admin')
     )
   );

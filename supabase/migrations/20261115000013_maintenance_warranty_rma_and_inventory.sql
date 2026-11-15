@@ -274,40 +274,40 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.work_order_parts_usage TO authent
 -- Policies for operations members
 CREATE POLICY "operations_maintenance_plans_all"
   ON public.maintenance_plans FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_maintenance_schedules_all"
   ON public.maintenance_schedules FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_maintenance_records_all"
   ON public.maintenance_records FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_rma_cases_all"
   ON public.rma_cases FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_rma_items_all"
   ON public.rma_items FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_parts_catalog_all"
   ON public.parts_catalog FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_stock_locations_all"
   ON public.stock_locations FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_stock_levels_all"
   ON public.stock_levels FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_stock_movements_all"
   ON public.stock_movements FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));
 
 CREATE POLICY "operations_work_order_parts_usage_all"
   ON public.work_order_parts_usage FOR ALL TO authenticated
-  USING (tenant_id IN (SELECT m.tenant_id FROM public.memberships m WHERE m.user_id = auth.uid()));
+  USING (tenant_id IN (SELECT m.tenant_id FROM public.tenant_memberships m WHERE m.user_id = auth.uid()));

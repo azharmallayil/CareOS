@@ -6,15 +6,15 @@
 -- 1. Optimized Compound & Text Search Indexes for Performance
 -- Tickets reporting & search indexes
 CREATE INDEX IF NOT EXISTS idx_tickets_reporting ON public.tickets(tenant_id, created_at, status, priority);
-CREATE INDEX IF NOT EXISTS idx_tickets_customer_reporting ON public.tickets(tenant_id, customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_tickets_customer_reporting ON public.tickets(tenant_id, customer_account_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tickets_search_number ON public.tickets(tenant_id, ticket_number);
 CREATE INDEX IF NOT EXISTS idx_tickets_search_title ON public.tickets USING gin(to_tsvector('english', title));
 
 -- Assets search & fleet reporting indexes
-CREATE INDEX IF NOT EXISTS idx_assets_reporting ON public.assets(tenant_id, customer_id, operational_status);
+CREATE INDEX IF NOT EXISTS idx_assets_reporting ON public.assets(tenant_id, customer_account_id, operational_status);
 CREATE INDEX IF NOT EXISTS idx_assets_search_plate ON public.assets(tenant_id, plate_number);
 CREATE INDEX IF NOT EXISTS idx_assets_search_vin ON public.assets(tenant_id, vin);
-CREATE INDEX IF NOT EXISTS idx_assets_search_serial ON public.assets(tenant_id, serial_number);
+CREATE INDEX IF NOT EXISTS idx_assets_search_tag ON public.assets(tenant_id, asset_tag);
 
 -- Work Orders dispatch & technician workload indexes
 CREATE INDEX IF NOT EXISTS idx_work_orders_reporting ON public.work_orders(tenant_id, status, scheduled_date);
@@ -62,7 +62,7 @@ CREATE POLICY "Tenant users view own export audit logs"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -73,7 +73,7 @@ CREATE POLICY "Tenant users insert export audit logs"
     TO authenticated
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );

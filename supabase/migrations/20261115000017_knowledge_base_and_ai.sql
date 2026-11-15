@@ -85,7 +85,7 @@ CREATE POLICY "Tenant users view published knowledge articles"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
         AND is_published = true
@@ -97,13 +97,13 @@ CREATE POLICY "Operations staff manage knowledge articles"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -115,7 +115,7 @@ CREATE POLICY "Tenant users view authorized documents"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );
@@ -127,14 +127,14 @@ CREATE POLICY "Users access own AI conversations"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
         AND user_id = auth.uid()
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
         AND user_id = auth.uid()
@@ -147,13 +147,13 @@ CREATE POLICY "Users access own AI messages"
     TO authenticated
     USING (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     )
     WITH CHECK (
         tenant_id IN (
-            SELECT tm.tenant_id FROM public.tenant_members tm
+            SELECT tm.tenant_id FROM public.tenant_memberships tm
             WHERE tm.user_id = auth.uid() AND tm.is_active = true
         )
     );

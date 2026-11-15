@@ -5,6 +5,7 @@ import { Badge } from "../../components/ui/Badge.js";
 import {
   ShieldAlert,
   Building,
+  Database,
   Activity,
   Server,
   LogOut,
@@ -31,9 +32,8 @@ export function AdminShell({ children }: AdminShellProps) {
   };
 
   const navItems = [
-    { label: "Tenants Directory", path: "/admin", icon: Building, exact: true },
-    { label: "Global Audit Log", path: "/admin/audit", icon: Activity, exact: false },
-    { label: "Infrastructure & Telemetry", path: "/admin/system", icon: Server, exact: false },
+    { label: "Companies & Subscriptions", path: "/admin", icon: Building, exact: true },
+    { label: "Backup & Disaster Recovery", path: "/admin/backup", icon: Database, exact: false },
   ];
 
   return (

@@ -1,0 +1,25 @@
+# ==============================================================================
+# CareOS Reverse Proxy — Caddy Automated SSL Configuration
+# ==============================================================================
+
+{
+    admin off
+}
+
+# Catch-all HTTP / HTTPS or bind to your custom domain (e.g. api.yourcompany.com)
+:80 {
+    reverse_proxy api:3000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    encode gzip zstd
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}

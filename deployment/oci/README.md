@@ -1,177 +1,153 @@
-# CareOS — OCI Always Free ARM64 Background Worker Deployment Guide
+# CareOS — Oracle Cloud Infrastructure (OCI) Always Free Stack Guide
 
-> **Target Architecture:** Oracle Cloud Infrastructure (OCI) Always Free Ampere A1 Compute Instance (ARM64).
-> **Role:** Asynchronous background processing, SLA evaluation clock, durable ERP outbox synchronization, telematics event processing, and notifications.
-> **Security Posture:** **Strict Outbound-Only Networking.** Zero public web ports exposed. The worker polls Supabase PostgreSQL (`job_queue`) and pushes out to external APIs.
+> **Architecture (Option B):** Dedicated Cloud Instance running on Oracle Cloud Infrastructure (OCI) Always Free Ampere A1 (ARM64).
+> **Services Hosted:**
+> 1. **CareOS Fastify REST API Gateway** (`api:3000`)
+> 2. **24/7 SLA Clock, Telematics & ERP Background Worker** (`worker`)
+> 3. **Caddy Reverse Proxy with Automatic Zero-Config SSL** (`ports 80 & 443`)
+> **Frontend:** Hosted on Hostinger Managed Hosting (`https://relaxed-dodgerblue-newt-58.hostingersite.com` or custom domain).
+> **Database:** Supabase Cloud Singapore (`https://vbckrirksziluvwqpamx.supabase.co`).
 
 ---
 
-## 1. OCI Always Free Compute Specifications & Quotas
+## 1. OCI Always Free Specifications & Provisioning
 
-| Parameter | Specification | Notes |
+Oracle Cloud Infrastructure (OCI) provides permanently free compute resources:
+
+| Parameter | Recommended Specification | Notes |
 | :--- | :--- | :--- |
-| **Processor Architecture** | Arm (Ampere Altra A1) | Supported natively via multi-stage Dockerfile (`linux/arm64`). |
-| **Always Free Quota** | Up to 4 OCPUs and 24 GB RAM | CareOS worker requires only **1–2 OCPUs and 4–8 GB RAM**. |
-| **Operating System** | Ubuntu 22.04 LTS (AArch64) or Oracle Linux 9 (aarch64) | Standard LTS distribution with cloud-init support. |
-| **Boot Volume** | 50 GB to 100 GB (Always Free allows up to 200 GB total) | Standard balanced performance block storage. |
-| **Cost** | **$0.00 / month (Always Free)** | Eligible within standard OCI Always Free tier limits. |
-
-### ⚠️ Critical Notice: OCI Always Free Idle Instance Reclamation Policy
-Oracle reclaims idle Always Free compute instances if, over a 7-day rolling window:
-1. CPU utilization across the 95th percentile is less than 20%.
-2. Network utilization is less than 20%.
-3. Memory utilization is less than 20% (for A1 shapes).
-
-**CareOS Operational Mitigation:**
-- The CareOS worker runs a continuous 3-second polling interval against PostgreSQL `job_queue` and an SLA evaluation sweep every 60 seconds.
-- Memory reservations in `docker-compose.yml` (`reservations: memory: 512M`, `limits: memory: 2048M`) and standard telemetry logging provide consistent background activity.
-- The administrator can optionally run a lightweight systemd resource monitoring script if CPU utilization falls below threshold during quiet operational periods.
+| **Instance Shape** | `VM.Standard.A1.Flex` (Ampere Altra A1 ARM64) | 4 OCPUs and 24 GB RAM permanently free under OCI Always Free. |
+| **Operating System** | **Ubuntu 22.04 LTS (AArch64)** or **Oracle Linux 9 (aarch64)** | Clean cloud-init image. |
+| **Boot Volume** | 50 GB to 100 GB (Always Free allows up to 200 GB total) | Balanced performance. |
+| **Public IP** | Ephemeral or Reserved Public IPv4 | Free standard public IPv4. |
+| **Monthly Cost** | **$0.00 / month (Always Free)** | Permanent free tier allocation. |
 
 ---
 
-## 2. Infrastructure Setup: Minimal Firewall & Network Security
+## 2. Step-by-Step OCI Provisioning in Oracle Cloud Console
 
-Because the worker initiates **only outbound connections** to Supabase Cloud Singapore (`vbckrirksziluvwqpamx.supabase.co:443` and `5432`) and external HTTPS APIs:
-
-### VCN Ingress Security Rules (OCI Console)
-| Source CIDR | Protocol | Port Range | Purpose |
-| :--- | :--- | :--- | :--- |
-| `YOUR_ADMIN_OFFICE_IP/32` (or Bastion) | TCP | `22` (SSH) | Administrative access only. **Do not open 0.0.0.0/0 to port 22.** |
-| **All Other Ingress** | - | - | **DROP / BLOCK ALL INBOUND PORTS (No port 80, 443, 3000, 8080).** |
-
-### VCN Egress Security Rules (OCI Console)
-| Destination CIDR | Protocol | Port Range | Purpose |
-| :--- | :--- | :--- | :--- |
-| `0.0.0.0/0` | TCP | `443` (HTTPS) | Outbound connection to Supabase API and external webhooks (ERP/SMS/Email). |
-| `0.0.0.0/0` | TCP | `5432` / `6543` | Outbound PostgreSQL connection to Supabase database. |
-
----
-
-## 3. Host Hardening & Prerequisites on OCI VM
-
-Connect via SSH:
-```bash
-ssh -i ~/.ssh/id_ed25519 ubuntu@<OCI_VM_PUBLIC_IP>
-```
-
-Execute baseline hardening and Docker installation:
-```bash
-# 1. Update OS packages
-sudo apt update && sudo apt upgrade -y
-
-# 2. Install Docker Engine and Docker Compose Plugin
-sudo apt install -y ca-certificates curl gnupg lsb-release
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin git ufw
-
-# 3. Add deploy user to docker group
-sudo usermod -aG docker $USER
-
-# 4. Enable host-level UFW firewall
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow 22/tcp
-sudo ufw enable
-```
+### Step 1: Create Compute Instance
+1. Log in to [cloud.oracle.com](https://cloud.oracle.com).
+2. Go to **Menu** → **Compute** → **Instances** → Click **Create Instance**.
+3. **Name**: `careos-cloud-instance`
+4. **Image and Shape**:
+   - Image: **Ubuntu 22.04 Minimal (aarch64)** (or Oracle Linux 9).
+   - Shape: Click **Change Shape** → Select **Ampere** → Select `VM.Standard.A1.Flex`.
+   - Allocate: **2 to 4 OCPUs** and **12 to 24 GB RAM** (Always Free eligible).
+5. **Networking**:
+   - Create a new Virtual Cloud Network (VCN) or select existing.
+   - Ensure **Assign a public IPv4 address** is checked.
+6. **Add SSH Keys**:
+   - Select **Generate a key pair for me** and save the private key (e.g., `ssh-key-careos.key`), OR upload your existing public key (`id_ed25519.pub`).
+7. Click **Create**. The instance will be ready in 30–60 seconds.
 
 ---
 
-## 4. Directory Structure & Secret Configuration
+### Step 2: Open Ingress Ports in OCI Security List
+OCI VCNs block all inbound traffic except port 22 by default. You must open ports 80, 443, and 3000 in your VCN:
+1. In the OCI Console, navigate to **Compute** → **Instances** → Click your instance (`careos-cloud-instance`).
+2. Under **Primary VNIC**, click your **Subnet**.
+3. Under **Security Lists**, click **Default Security List for...**.
+4. Click **Add Ingress Rules**:
+   - **Source CIDR**: `0.0.0.0/0`
+   - **IP Protocol**: `TCP`
+   - **Destination Port Range**: `80, 443, 3000`
+   - **Description**: `CareOS Web, SSL, and API Gateway`
+5. Click **Add Ingress Rules**.
 
-Create application directory on OCI instance:
+---
+
+### Step 3: Connect via SSH & Run the Automated Setup Script
+
+1. Open your terminal and connect to your instance:
+   ```bash
+   chmod 400 ssh-key-careos.key
+   ssh -i ssh-key-careos.key ubuntu@<YOUR_OCI_PUBLIC_IP>
+   ```
+
+2. Clone or copy your CareOS repository to `/opt/careos`:
+   ```bash
+   sudo mkdir -p /opt/careos
+   sudo chown -R $USER:$USER /opt/careos
+   git clone https://github.com/azharmallayil/CareOS.git /opt/careos
+   cd /opt/careos/deployment/oci
+   ```
+
+3. Run the automated OCI bootstrap script:
+   ```bash
+   ./setup-oci.sh
+   ```
+   *This script automatically updates the system, installs Docker & Docker Compose, and unblocks the OCI Linux host firewall (`iptables` / `firewalld`) for ports 80, 443, and 3000.*
+
+---
+
+### Step 4: Configure Production Environment Variables
+
+Edit the `.env` file created in `deployment/oci`:
 ```bash
-sudo mkdir -p /opt/careos
-sudo chown -R $USER:$USER /opt/careos
-cd /opt/careos
+nano /opt/careos/deployment/oci/.env
 ```
 
-Create `/opt/careos/.env` with strict permissions:
+Ensure the following variables are set:
 ```bash
-cat << 'EOF' > /opt/careos/.env
 NODE_ENV=production
+PORT=3000
+HOST=0.0.0.0
 LOG_LEVEL=info
-SUPABASE_URL=https://vbckrirksziluvwqpamx.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<SECRET_SERVICE_ROLE_KEY>
-POLL_INTERVAL_MS=3000
-LEASE_DURATION_SECONDS=60
-WORKER_CONCURRENCY=3
-EOF
 
-chmod 600 /opt/careos/.env
+# Supabase Credentials (Singapore)
+SUPABASE_URL=https://vbckrirksziluvwqpamx.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZiY2tyaXJrc3ppbHV2d3FwYW14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ2Njg5OTcsImV4cCI6MjExMDI0NDk5N30.76jizSAIaVw3MXHAY87fNOfsUO3Ev6BTE4I5jRmFQIM
+SUPABASE_SERVICE_ROLE_KEY=<YOUR_SUPABASE_SERVICE_ROLE_KEY>
+SUPABASE_JWT_SECRET=<YOUR_SUPABASE_JWT_SECRET>
+
+# Secrets
+COOKIE_SECRET=32_char_random_secret_here
+JWT_SECRET=32_char_random_secret_here
+
+# Allowed Frontend Origins (Include your Hostinger domain)
+CORS_ORIGINS=https://relaxed-dodgerblue-newt-58.hostingersite.com,http://localhost:5173
 ```
 
 ---
 
-## 5. Deployment & Execution via Docker Compose
+### Step 5: Start the CareOS Multi-Container Stack
 
-Transfer `docker-compose.yml` and repository source (or pre-built ARM64 Docker image from private registry) to `/opt/careos/`.
-
-Build and start the container:
+Launch the stack using Docker Compose:
 ```bash
-cd /opt/careos
+cd /opt/careos/deployment/oci
 docker compose up -d --build
 ```
 
-Verify running container:
+Verify that all three containers are running healthy:
 ```bash
-docker ps
+docker compose ps
 ```
-Output should show `careos-worker` with status `Up (healthy)` and **no published ports**.
-
----
-
-## 6. Systemd Integration for Automatic Boot Restart
-
-Create `/etc/systemd/system/careos-worker.service`:
-```ini
-[Unit]
-Description=CareOS Background Worker Container
-Requires=docker.service
-After=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/opt/careos
-ExecStart=/usr/bin/docker compose up -d
-ExecStop=/usr/bin/docker compose down
-TimeoutStartSec=0
-
-[Install]
-WantedBy=multi-user.target
+Expected output:
 ```
-
-Enable and start the service:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable careos-worker.service
+NAME            IMAGE                  COMMAND                  SERVICE   STATUS              PORTS
+careos-api      careos-api:latest      "node apps/api/dist/…"   api       running (healthy)   0.0.0.0:3000->3000/tcp
+careos-worker   careos-worker:latest   "node dist/index.js"     worker    running (healthy)   
+careos-caddy    caddy:2-alpine         "caddy run --config …"   caddy     running             0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp
 ```
 
 ---
 
-## 7. Logs, Monitoring & Updates
+## 3. Smoke Testing & Verification
 
-### Viewing Realtime Worker Logs
-```bash
-docker logs -f careos-worker
-```
+From your local machine or browser, verify the API is responding:
 
-### Resource Utilization Inspection
-```bash
-docker stats careos-worker --no-stream
-```
+1. **Health Endpoint**:
+   ```bash
+   curl -i http://<YOUR_OCI_PUBLIC_IP>:3000/health
+   # Expected: HTTP/1.1 200 OK -> {"status":"ok","timestamp":"..."}
+   ```
 
-### Applying Worker Code Updates
-```bash
-cd /opt/careos
-git pull origin main
-docker compose build --no-cache
-docker compose up -d --force-recreate
-```
+2. **OpenAPI 3.0 Documentation**:
+   Visit `http://<YOUR_OCI_PUBLIC_IP>:3000/documentation` in your browser.
 
-### Crash Recovery Verification
-- If the OCI VM restarts unexpectedly, Docker and systemd automatically restart `careos-worker`.
-- The worker executes crash recovery on boot: any jobs left in `processing` status whose leases expired (`lease_expires_at < now()`) are reclaimed and re-executed.
+3. **Check Live Worker Logs**:
+   ```bash
+   docker compose logs -f worker
+   # Shows SLA engine ticking and polling PostgreSQL job queue
+   ```

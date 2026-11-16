@@ -1,26 +1,63 @@
 # ==============================================================================
-# CareOS Background Worker — OCI Always Free Docker Compose Configuration
-# ==============================================================================
-# Architecture: Outbound-only worker container
-# No public ports exposed. Connects outbound to Supabase Cloud Singapore.
+# CareOS Cloud Stack — OCI Always Free Docker Compose
+# Architecture: High-Availability Fastify API + 24/7 SLA Background Worker + Caddy SSL
+# Target: Oracle Cloud Infrastructure (OCI) Always Free Ampere A1 (ARM64)
 # ==============================================================================
 
 version: "3.8"
 
 services:
+  # ── 1. Fastify Core REST API Gateway ─────────────────────────────────────────
+  api:
+    container_name: careos-api
+    image: careos-api:latest
+    build:
+      context: ../..
+      dockerfile: deployment/oci/Dockerfile.api
+    restart: always
+    stop_grace_period: 30s
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+    expose:
+      - "3000"
+    ports:
+      # Expose port 3000 directly (if accessing without Caddy or debugging)
+      - "3000:3000"
+    networks:
+      - careos-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4096M
+        reservations:
+          cpus: "0.5"
+          memory: 1024M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ── 2. SLA Clock, Telematics & ERP Background Worker ────────────────────────
   worker:
     container_name: careos-worker
     image: careos-worker:latest
     build:
       context: ../..
-      dockerfile: deployment/oci/Dockerfile
-    restart: unless-stopped
+      dockerfile: deployment/oci/Dockerfile.worker
+    restart: always
     stop_grace_period: 30s
     env_file:
       - .env
-    # Outbound-only networking: NO PORTS EXPOSED
+    environment:
+      - NODE_ENV=production
     networks:
-      - careos-internal
+      - careos-network
     deploy:
       resources:
         limits:
@@ -35,6 +72,27 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  # ── 3. Caddy HTTPS Reverse Proxy (Automatic Zero-Config SSL) ────────────────
+  caddy:
+    container_name: careos-caddy
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - careos-network
+    depends_on:
+      - api
+
 networks:
-  careos-internal:
+  careos-network:
     driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

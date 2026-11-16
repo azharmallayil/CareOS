@@ -1,0 +1,63 @@
+# ==============================================================================
+# CareOS Fastify API Server — Production Multi-Arch (ARM64 & AMD64) Dockerfile
+# Target: Oracle Cloud Infrastructure (OCI) Always Free Ampere A1 (ARM64)
+# ==============================================================================
+
+FROM --platform=$TARGETPLATFORM node:20-alpine AS base
+RUN npm install -g pnpm@9
+
+# ── Dependencies Stage ────────────────────────────────────────────────────────
+FROM base AS deps
+WORKDIR /app
+
+# Copy root workspace manifests
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* .npmrc* ./
+
+# Copy all package manifests for pnpm workspace resolution
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages ./packages/
+COPY connectors ./connectors/
+
+RUN pnpm install --frozen-lockfile
+
+# ── Build Stage ───────────────────────────────────────────────────────────────
+FROM deps AS builder
+WORKDIR /app
+
+COPY tsconfig.base.json ./
+COPY apps/api ./apps/api
+COPY apps/web ./apps/web
+
+# Build static web frontend bundle (for single-origin serving)
+RUN cd apps/web && pnpm build && cd ../..
+
+# Build Fastify TypeScript API
+RUN pnpm --filter @careos/api build
+
+# ── Production Runner ─────────────────────────────────────────────────────────
+FROM --platform=$TARGETPLATFORM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOST=0.0.0.0
+ENV WEB_DIST_PATH=/app/web/dist
+
+RUN apk add --no-cache curl
+
+# Copy node_modules & built bundles
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
+COPY --from=builder /app/apps/web/dist ./web/dist
+COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/connectors ./connectors
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://127.0.0.1:3000/health || exit 1
+
+CMD ["node", "apps/api/dist/server.js"]

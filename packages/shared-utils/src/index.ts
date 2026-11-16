@@ -81,10 +81,15 @@ export function maskString(value: string, visibleStart = 4, visibleEnd = 4): str
 
 /** Normalise phone to E.164 (basic — does not replace libphonenumber) */
 export function normalisePhone(phone: string, defaultCountryCode = "966"): string {
-  const digits = phone.replace(/\D/g, "");
+  const trimmed = phone.trim();
+  if (trimmed.startsWith("+")) {
+    const digits = trimmed.slice(1).replace(/\D/g, "");
+    return `+${digits}`;
+  }
+  const digits = trimmed.replace(/\D/g, "");
   if (digits.startsWith("00")) return `+${digits.slice(2)}`;
-  if (digits.startsWith("+")) return phone.trim();
   if (digits.startsWith("0")) return `+${defaultCountryCode}${digits.slice(1)}`;
+  if (digits.startsWith(defaultCountryCode)) return `+${digits}`;
   return `+${defaultCountryCode}${digits}`;
 }
 

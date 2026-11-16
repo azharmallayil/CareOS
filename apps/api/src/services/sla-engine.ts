@@ -39,7 +39,7 @@ export function calculateSlaTargetDate(
   const dailyWorkMinutes = (endH * 60 + endM) - (startH * 60 + startM);
 
   let remainingMinutes = targetHours * 60;
-  let current = new Date(startDate);
+  const current = new Date(startDate);
 
   // If start is outside working day or after hours, advance to next start of day
   while (remainingMinutes > 0) {

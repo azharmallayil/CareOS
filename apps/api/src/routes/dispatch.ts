@@ -2,8 +2,8 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { createAdminClient } from "@careos/supabase-client";
 import { requireAuth, requireTenant } from "../middleware/guards.js";
-import {
-  computeTechnicianRecommendations,
+import { computeTechnicianRecommendations } from "../services/dispatch-engine.js";
+import type {
   TechnicianCandidate,
   TicketDispatchContext,
 } from "../services/dispatch-engine.js";

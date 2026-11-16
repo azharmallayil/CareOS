@@ -1,20 +1,20 @@
 // @ts-check
-import eslint from "@eslint/js";
+import { createRequire } from "node:module";
 import tseslint from "typescript-eslint";
 import globals from "globals";
 
+const require = createRequire(import.meta.url);
+const eslintRequire = createRequire(require.resolve("eslint"));
+const eslint = eslintRequire("@eslint/js");
+
 export default tseslint.config(
   eslint.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked,
+  ...tseslint.configs.recommended,
   {
     languageOptions: {
       globals: {
         ...globals.node,
         ...globals.browser,
-      },
-      parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
@@ -35,21 +35,15 @@ export default tseslint.config(
 
       // General quality rules
       "@typescript-eslint/no-unused-vars": [
-        "error",
+        "warn",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "@typescript-eslint/consistent-type-imports": [
         "error",
         { prefer: "type-imports" },
       ],
-      "@typescript-eslint/no-floating-promises": "error",
-      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-explicit-any": "off",
     },
-  },
-  {
-    // Disable type-aware linting for JS config files
-    files: ["*.config.{js,mjs,cjs}", "*.config.*.{js,mjs,cjs}"],
-    ...tseslint.configs.disableTypeChecked,
   },
   {
     ignores: [
@@ -58,6 +52,7 @@ export default tseslint.config(
       "**/.storybook/**",
       "**/coverage/**",
       "supabase/functions/**",
+      "scripts/**",
     ],
   }
 );

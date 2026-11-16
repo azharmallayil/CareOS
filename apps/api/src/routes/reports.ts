@@ -292,7 +292,7 @@ export const reportRoutes: FastifyPluginAsync = async (fastify) => {
 
       // ── Assets Export ──────────────────────────────────────────────────────
       else if (entityType === "assets") {
-        let query = adminClient
+        const query = adminClient
           .from("assets")
           .select("id, plate_number, vin, serial_number, fleet_number, make, model, year, operational_status, customer:customer_accounts(name)")
           .eq("tenant_id", tenantId);

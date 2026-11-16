@@ -56,7 +56,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
           created_at,
           customer:customer_accounts(id, name, account_number),
           site:customer_sites(id, name, city, latitude, longitude),
-          asset:assets(id, make, model, year, vin, fleet_number),
+          asset:assets(id, make, model, model_year, vin, fleet_number),
           category:ticket_categories(id, code, name)
         `)
         .eq("tenant_id", tenantId)
@@ -133,6 +133,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
         .select(`
           id,
           work_order_number,
+          ticket_id,
           status,
           priority,
           scheduled_date,
@@ -146,11 +147,19 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
         .in("status", ["assigned", "accepted", "en_route", "on_site", "in_progress"]);
 
       const techActiveWOsMap = new Map<string, any[]>();
+      const seenTechTicketSet = new Set<string>();
+
       (activeWOs || []).forEach((wo: any) => {
         if (wo.technician_id) {
+          // If already tracked an active work order for this ticket and technician, avoid duplicating workload
+          const techTicketKey = `${wo.technician_id}:${wo.ticket_id}`;
+          if (seenTechTicketSet.has(techTicketKey)) return;
+          seenTechTicketSet.add(techTicketKey);
+
           const list = techActiveWOsMap.get(wo.technician_id) || [];
           list.push({
             id: wo.id,
+            ticketId: wo.ticket_id,
             workOrderNumber: wo.work_order_number,
             status: wo.status,
             priority: wo.priority,
@@ -289,6 +298,98 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Technician not found" } });
       }
 
+      // Check if an active work order already exists for this ticket to prevent duplicate work orders
+      const { data: existingWo } = await adminClient
+        .from("work_orders")
+        .select("id, work_order_number, technician_id, status, scheduled_date")
+        .eq("tenant_id", tenantId)
+        .eq("ticket_id", ticketId)
+        .not("status", "in", '("completed","cancelled")')
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingWo) {
+        const isSameTech = existingWo.technician_id === technicianId;
+        const oldTechId = existingWo.technician_id;
+
+        // If assigning to a different technician, close out the old technician in assignment history
+        if (!isSameTech && oldTechId) {
+          await adminClient
+            .from("technician_assignment_history")
+            .update({
+              unassigned_at: new Date().toISOString(),
+              reassignment_reason: "Reassigned via Dispatch",
+            })
+            .eq("work_order_id", existingWo.id)
+            .eq("technician_id", oldTechId)
+            .is("unassigned_at", null);
+        }
+
+        // Record history event
+        await adminClient.from("technician_assignment_history").insert({
+          tenant_id: tenantId,
+          ticket_id: ticketId,
+          work_order_id: existingWo.id,
+          technician_id: technicianId,
+          action: isSameTech ? "assigned" : "reassigned",
+          actor_id: userId,
+          assigned_at: new Date().toISOString(),
+          reassignment_reason: isSameTech ? undefined : "Reassigned to new technician",
+        });
+
+        // Update the existing work order without creating duplicates
+        const { data: updatedWo, error: updateErr } = await adminClient
+          .from("work_orders")
+          .update({
+            technician_id: technicianId,
+            status: "assigned",
+            priority,
+            scheduled_date: scheduledDate,
+            scheduled_window_start: scheduledWindowStart,
+            scheduled_window_end: scheduledWindowEnd,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingWo.id)
+          .select()
+          .single();
+
+        if (updateErr) {
+          return reply.status(500).send({ error: { code: "DB_ERROR", message: updateErr.message } });
+        }
+
+        // Keep ticket status and assigned_to in sync
+        await adminClient
+          .from("tickets")
+          .update({
+            status: "scheduled",
+            assigned_to: tech.user_id || tech.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", ticketId);
+
+        // Record ticket timeline event
+        await adminClient.from("ticket_events").insert({
+          tenant_id: tenantId,
+          ticket_id: ticketId,
+          actor_id: userId,
+          actor_role: "operations",
+          event_type: isSameTech ? "technician_assigned" : "technician_reassigned",
+          is_internal: false,
+          body: isSameTech
+            ? `Work Order ${existingWo.work_order_number} schedule updated for technician ${tech.full_name}. Scheduled for ${scheduledDate} (${scheduledWindowStart}-${scheduledWindowEnd}).`
+            : `Work Order ${existingWo.work_order_number} reassigned to technician ${tech.full_name}. Scheduled for ${scheduledDate} (${scheduledWindowStart}-${scheduledWindowEnd}).`,
+        });
+
+        return reply.status(200).send({
+          workOrder: updatedWo,
+          message: isSameTech
+            ? `Work Order ${existingWo.work_order_number} updated for ${tech.full_name}`
+            : `Work Order ${existingWo.work_order_number} reassigned to ${tech.full_name}`,
+        });
+      }
+
+      // If no active work order exists, generate a new work order number and create one
       const { data: woNumberData } = await adminClient.rpc(
         "generate_work_order_number",
         { p_tenant_id: tenantId }

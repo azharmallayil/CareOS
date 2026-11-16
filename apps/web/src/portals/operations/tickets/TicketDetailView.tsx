@@ -310,6 +310,7 @@ export function TicketDetailView() {
           headers: {
             Authorization: `Bearer ${token}`,
             "X-Tenant-ID": tenantId,
+            "X-Portal": "operations",
           },
         }
       );
@@ -341,6 +342,7 @@ export function TicketDetailView() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           "X-Tenant-ID": tenantId,
+          "X-Portal": "operations",
         },
         body: JSON.stringify({
           ticketId: id,
@@ -416,6 +418,7 @@ export function TicketDetailView() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           "X-Tenant-ID": tenantId,
+          "X-Portal": "operations",
         },
         body: JSON.stringify({
           eventType: "comment",

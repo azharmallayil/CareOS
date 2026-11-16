@@ -127,7 +127,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (fastify) => {
         .select(`
           *,
           plan:maintenance_plans(*),
-          asset:assets(id, make, model, year, vin, fleet_number)
+          asset:assets(id, make, model, model_year, vin, fleet_number)
         `)
         .eq("tenant_id", tenantId);
 

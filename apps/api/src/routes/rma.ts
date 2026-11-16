@@ -71,7 +71,7 @@ export const rmaRoutes: FastifyPluginAsync = async (fastify) => {
           authorized_at,
           created_at,
           customer:customer_accounts(id, name, account_number),
-          asset:assets(id, make, model, year, vin, fleet_number),
+          asset:assets(id, make, model, model_year, vin, fleet_number),
           ticket:tickets(id, ticket_number, title),
           items:rma_items(id, item_type, serial_number, part_number, inspection_result, action_taken)
         `)

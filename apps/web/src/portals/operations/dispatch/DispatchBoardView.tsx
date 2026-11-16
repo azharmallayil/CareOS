@@ -122,13 +122,13 @@ export function DispatchBoardView() {
     try {
       const [queueRes, woRes, techRes] = await Promise.all([
         fetch("/api/v1/dispatch/queue", {
-          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId },
+          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId, "X-Portal": "operations" },
         }),
         fetch("/api/v1/work-orders", {
-          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId },
+          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId, "X-Portal": "operations" },
         }),
         fetch("/api/v1/technicians", {
-          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId },
+          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId, "X-Portal": "operations" },
         }),
       ]);
 
@@ -165,7 +165,7 @@ export function DispatchBoardView() {
       const res = await fetch(
         `/api/v1/dispatch/recommendations?ticketId=${ticket.id}&scheduledDate=${dateToQuery}`,
         {
-          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId || "" },
+          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId || "", "X-Portal": "operations" },
         }
       );
       if (res.ok) {
@@ -190,6 +190,7 @@ export function DispatchBoardView() {
         headers: {
           Authorization: `Bearer ${token}`,
           "X-Tenant-ID": tenantId || "",
+          "X-Portal": "operations",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -218,6 +219,7 @@ export function DispatchBoardView() {
         headers: {
           Authorization: `Bearer ${token}`,
           "X-Tenant-ID": tenantId || "",
+          "X-Portal": "operations",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -416,7 +418,7 @@ export function DispatchBoardView() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-neutral-600">
-                        {wo.scheduled_date} ({wo.scheduled_window_start.slice(0, 5)} - {wo.scheduled_window_end.slice(0, 5)})
+                        {wo.scheduled_date} ({wo.scheduled_window_start ? wo.scheduled_window_start.slice(0, 5) : "--:--"} - {wo.scheduled_window_end ? wo.scheduled_window_end.slice(0, 5) : "--:--"})
                       </td>
                       <td className="px-4 py-3">
                         <button

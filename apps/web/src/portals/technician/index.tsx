@@ -60,7 +60,11 @@ function TechnicianOverview() {
     setLoading(true);
     try {
       const res = await fetch("/api/v1/work-orders", {
-        headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-ID": tenantId,
+          "X-Portal": "technician",
+        },
       });
       if (res.ok) {
         const data = await res.json();
@@ -81,7 +85,11 @@ function TechnicianOverview() {
     try {
       const res = await fetch(`/api/v1/work-orders/${woId}/accept`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId || "" },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-ID": tenantId || "",
+          "X-Portal": "technician",
+        },
       });
       if (res.ok) {
         fetchWorkOrders();
@@ -99,6 +107,7 @@ function TechnicianOverview() {
         headers: {
           Authorization: `Bearer ${token}`,
           "X-Tenant-ID": tenantId || "",
+          "X-Portal": "technician",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -123,6 +132,7 @@ function TechnicianOverview() {
         headers: {
           Authorization: `Bearer ${token}`,
           "X-Tenant-ID": tenantId || "",
+          "X-Portal": "technician",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ status }),

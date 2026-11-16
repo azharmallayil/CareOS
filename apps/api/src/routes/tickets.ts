@@ -1002,6 +1002,40 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
+    // If ticket was unassigned, also clean up active work orders and technician assignment history
+    if (!assignedTo) {
+      const { data: activeWos } = await client
+        .from("work_orders")
+        .select("id, technician_id")
+        .eq("tenant_id", tenantId)
+        .eq("ticket_id", id)
+        .not("status", "in", '("completed","cancelled")');
+
+      if (activeWos && activeWos.length > 0) {
+        for (const wo of activeWos) {
+          if (wo.technician_id) {
+            await client
+              .from("technician_assignment_history")
+              .update({
+                unassigned_at: nowIso,
+                reassignment_reason: reason || "Unassigned via Operations Desk",
+              })
+              .eq("work_order_id", wo.id)
+              .eq("technician_id", wo.technician_id)
+              .is("unassigned_at", null);
+          }
+          await client
+            .from("work_orders")
+            .update({
+              technician_id: null,
+              status: "cancelled",
+              updated_at: nowIso,
+            })
+            .eq("id", wo.id);
+        }
+      }
+    }
+
     // Log event
     const actionDesc = assignedTo ? `Ticket assigned to technician (${assignedTo})` : "Ticket unassigned";
     await client.from("ticket_events").insert({

@@ -51,6 +51,26 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const { technicianId, ticketId, status, date } = request.query;
+      const userId = request.auth?.user.id;
+      const portal = (request.headers["x-portal"] as string) || request.auth?.activeMembership?.portal;
+
+      let effectiveTechnicianId = technicianId;
+
+      // If requested from technician portal or user is a technician, default to their technician profile
+      if (!effectiveTechnicianId && portal === "technician" && userId) {
+        const { data: tech } = await adminClient
+          .from("technicians")
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (tech) {
+          effectiveTechnicianId = tech.id;
+        } else {
+          return reply.send({ workOrders: [] });
+        }
+      }
 
       let query = adminClient
         .from("work_orders")
@@ -71,13 +91,13 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
           technician:technicians(id, full_name, email, phone),
           customer:customer_accounts(id, name, account_number),
           site:customer_sites(id, name, city, address_line1, latitude, longitude),
-          asset:assets(id, make, model, year, vin, fleet_number)
+          asset:assets(id, make, model, model_year, vin, fleet_number)
         `)
         .eq("tenant_id", tenantId)
         .order("scheduled_date", { ascending: false });
 
-      if (technicianId) {
-        query = query.eq("technician_id", technicianId);
+      if (effectiveTechnicianId) {
+        query = query.eq("technician_id", effectiveTechnicianId);
       }
       if (ticketId) {
         query = query.eq("ticket_id", ticketId);
@@ -185,6 +205,14 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
           .eq("technician_id", wo.technician_id)
           .is("responded_at", null);
       }
+
+      await adminClient
+        .from("tickets")
+        .update({
+          status: "accepted",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", wo.ticket_id);
 
       await adminClient.from("ticket_events").insert({
         tenant_id: tenantId,
@@ -331,26 +359,53 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       let woStatus = "in_progress";
+      let ticketStatus: string | null = null;
+
       if (stage === "travel" && status === "in_progress") {
         woStatus = "en_route";
+        ticketStatus = "technician_en_route";
       } else if (stage === "arrival_checkin" && (status === "in_progress" || status === "completed")) {
         woStatus = "on_site";
+        ticketStatus = "arrived";
         await adminClient
           .from("work_orders")
           .update({ actual_checkin_at: new Date().toISOString() })
           .eq("id", id);
+      } else if (stage === "execution" && status === "in_progress") {
+        woStatus = "in_progress";
+        ticketStatus = "in_progress";
       } else if (stage === "checkout" && status === "completed") {
         woStatus = "completed";
+        ticketStatus = "service_completed";
         await adminClient
           .from("work_orders")
           .update({ actual_checkout_at: new Date().toISOString() })
           .eq("id", id);
       }
 
-      await adminClient
+      const { data: updatedWo } = await adminClient
         .from("work_orders")
         .update({ status: woStatus, updated_at: new Date().toISOString() })
-        .eq("id", id);
+        .eq("id", id)
+        .select("id, ticket_id, work_order_number")
+        .single();
+
+      if (ticketStatus && updatedWo?.ticket_id) {
+        await adminClient
+          .from("tickets")
+          .update({ status: ticketStatus, updated_at: new Date().toISOString() })
+          .eq("id", updatedWo.ticket_id);
+
+        await adminClient.from("ticket_events").insert({
+          tenant_id: tenantId,
+          ticket_id: updatedWo.ticket_id,
+          actor_id: request.auth?.user.id,
+          actor_role: "technician",
+          event_type: `stage_${stage}_${status}`,
+          is_internal: false,
+          body: `Work Order ${updatedWo.work_order_number} stage '${stage}' transitioned to ${status}. Status: ${woStatus.replace(/_/g, " ")}.`,
+        });
+      }
 
       return reply.send({ stage: updatedStage, workOrderStatus: woStatus });
     }

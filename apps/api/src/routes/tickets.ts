@@ -465,12 +465,61 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify) => {
       .eq("ticket_id", id)
       .order("created_at", { ascending: false });
 
+    // Fetch linked work orders & technician details
+    const { data: workOrders } = await client
+      .from("work_orders")
+      .select(`
+        id,
+        work_order_number,
+        status,
+        priority,
+        scheduled_date,
+        scheduled_window_start,
+        scheduled_window_end,
+        technician:technicians (
+          id,
+          user_id,
+          full_name,
+          email,
+          phone,
+          avg_rating,
+          status,
+          skills:technician_skills(skill_code, skill_name)
+        )
+      `)
+      .eq("tenant_id", tenantId)
+      .eq("ticket_id", id)
+      .order("created_at", { ascending: false });
+
+    let assignedTechnician: any = (workOrders?.[0] as any)?.technician || null;
+    if (!assignedTechnician && ticket.assigned_to) {
+      const { data: techProfile } = await client
+        .from("technicians")
+        .select(`
+          id,
+          user_id,
+          full_name,
+          email,
+          phone,
+          avg_rating,
+          status,
+          skills:technician_skills(skill_code, skill_name)
+        `)
+        .eq("tenant_id", tenantId)
+        .or(`user_id.eq.${ticket.assigned_to},id.eq.${ticket.assigned_to}`)
+        .maybeSingle();
+      assignedTechnician = techProfile;
+    }
+
     return reply.send({
       data: {
         ...ticket,
         statusHistory: statusHistory || [],
         events: events || [],
         complaints: linkedComplaints || [],
+        workOrders: workOrders || [],
+        activeWorkOrder: workOrders?.[0] || null,
+        assignedTechnician: assignedTechnician || null,
       },
     });
   });

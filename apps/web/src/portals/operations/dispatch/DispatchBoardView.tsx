@@ -16,6 +16,10 @@ import {
   Shield,
   RefreshCw,
   Plus,
+  Zap,
+  Check,
+  Star,
+  Phone,
 } from "lucide-react";
 
 interface QueueItem {
@@ -25,7 +29,7 @@ interface QueueItem {
   priority: string;
   coverage_type: string;
   customer?: { name: string };
-  site?: { name: string; city?: string };
+  site?: { name: string; city?: string; latitude?: number; longitude?: number };
   asset?: { make?: string; model?: string; fleet_number?: string; vin?: string };
   category?: { name: string; code: string };
   created_at: string;
@@ -34,14 +38,40 @@ interface QueueItem {
 interface Recommendation {
   technicianId: string;
   fullName: string;
+  phone?: string;
+  email?: string;
+  avgRating: number;
   totalScore: number;
   isEligible: boolean;
+  isAvailable: boolean;
+  currentWorkload: number;
+  maxActiveWorkOrders: number;
+  distanceKm?: number | null;
+  skills: Array<{ skillCode: string; skillName: string; proficiencyLevel?: string }>;
+  territories: string[];
+  activeWorkOrders: Array<{
+    id: string;
+    workOrderNumber: string;
+    status: string;
+    priority: string;
+    siteName?: string;
+    siteCity?: string;
+    distanceKm?: number;
+  }>;
+  isNearbyAddon: boolean;
+  nearbyAddonOpportunity?: {
+    workOrderNumber: string;
+    siteName: string;
+    distanceKm: number;
+    description: string;
+  } | null;
   scoreBreakdown: {
     skillScore: number;
     territoryScore: number;
     availabilityScore: number;
     workloadScore: number;
     proximityScore: number;
+    routeAddonScore?: number;
   };
   reasons: string[];
 }
@@ -80,8 +110,9 @@ export function DispatchBoardView() {
     new Date().toISOString().split("T")[0] || ""
   );
 
-  // Reassignment state
+  // Reassignment state & technician list
   const [reassignModalWo, setReassignModalWo] = useState<WorkOrder | null>(null);
+  const [techniciansList, setTechniciansList] = useState<any[]>([]);
   const [newTechId, setNewTechId] = useState("");
   const [reassignmentReason, setReassignmentReason] = useState("");
 
@@ -89,11 +120,14 @@ export function DispatchBoardView() {
     if (!token || !tenantId) return;
     setLoading(true);
     try {
-      const [queueRes, woRes] = await Promise.all([
+      const [queueRes, woRes, techRes] = await Promise.all([
         fetch("/api/v1/dispatch/queue", {
           headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId },
         }),
         fetch("/api/v1/work-orders", {
+          headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId },
+        }),
+        fetch("/api/v1/technicians", {
           headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId },
         }),
       ]);
@@ -106,6 +140,10 @@ export function DispatchBoardView() {
         const wData = await woRes.json();
         setWorkOrders(wData.workOrders || []);
       }
+      if (techRes.ok) {
+        const tData = await techRes.json();
+        setTechniciansList(tData.technicians || []);
+      }
     } catch (err) {
       console.error("Error fetching dispatch board data", err);
     } finally {
@@ -117,14 +155,15 @@ export function DispatchBoardView() {
     fetchData();
   }, [tenantId, token]);
 
-  const loadRecommendations = async (ticket: QueueItem) => {
+  const loadRecommendations = async (ticket: QueueItem, dateOverride?: string) => {
     setSelectedTicket(ticket);
     setRecLoading(true);
     setRecommendations([]);
     setAssigningTechId("");
+    const dateToQuery = dateOverride || scheduledDate || new Date().toISOString().split("T")[0];
     try {
       const res = await fetch(
-        `/api/v1/dispatch/recommendations?ticketId=${ticket.id}&scheduledDate=${scheduledDate}`,
+        `/api/v1/dispatch/recommendations?ticketId=${ticket.id}&scheduledDate=${dateToQuery}`,
         {
           headers: { Authorization: `Bearer ${token}`, "X-Tenant-ID": tenantId || "" },
         }
@@ -455,42 +494,152 @@ export function DispatchBoardView() {
                   No active technician profiles registered.
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {recommendations.map((rec) => (
-                    <label
-                      key={rec.technicianId}
-                      className={`flex items-start gap-3 rounded-xl border p-3.5 cursor-pointer transition ${
-                        assigningTechId === rec.technicianId
-                          ? "border-blue-600 bg-blue-50/50"
-                          : "border-neutral-200 hover:border-neutral-300 bg-white"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="technician"
-                        checked={assigningTechId === rec.technicianId}
-                        onChange={() => setAssigningTechId(rec.technicianId)}
-                        className="mt-1"
-                      />
-                      <div className="flex-1 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-neutral-900 text-sm">
-                            {rec.fullName}
-                          </span>
-                          <span className="font-mono font-bold text-blue-600 text-xs">
-                            Score: {rec.totalScore} / 100
-                          </span>
+                <div className="space-y-2.5">
+                  {recommendations.map((rec) => {
+                    const isSelected = assigningTechId === rec.technicianId;
+                    return (
+                      <div
+                        key={rec.technicianId}
+                        onClick={() => setAssigningTechId(rec.technicianId)}
+                        className={`relative rounded-xl border p-3.5 cursor-pointer transition text-xs ${
+                          isSelected
+                            ? "border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 shadow-xs"
+                            : "border-neutral-200 hover:border-neutral-300 bg-white"
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className={`h-9 w-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0 border ${
+                              isSelected ? "bg-blue-600 text-white border-blue-700" : "bg-neutral-100 text-neutral-700 border-neutral-200"
+                            }`}>
+                              {rec.fullName.charAt(0)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-sm text-neutral-900">{rec.fullName}</span>
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.2 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                                  ★ {Number(rec.avgRating || 5.0).toFixed(1)}
+                                </span>
+                                {rec.isNearbyAddon && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                                    <Zap className="h-2.5 w-2.5 fill-white" />
+                                    ROUTE ADD-ON OPPORTUNITY
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-neutral-500 text-[11px] mt-0.5">
+                                {rec.phone && (
+                                  <span className="flex items-center gap-1">
+                                    <Phone className="h-3 w-3 text-neutral-400" />
+                                    {rec.phone}
+                                  </span>
+                                )}
+                                {rec.distanceKm !== null && rec.distanceKm !== undefined ? (
+                                  <span className="flex items-center gap-1 font-semibold text-neutral-700">
+                                    <MapPin className="h-3 w-3 text-rose-500" />
+                                    📍 {rec.distanceKm} km to site
+                                  </span>
+                                ) : (
+                                  <span className="text-neutral-400">
+                                    Territory: {rec.territories.join(", ") || "General"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex sm:flex-col items-center sm:items-end justify-between gap-1 shrink-0">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold ${
+                              rec.currentWorkload === 0
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : rec.currentWorkload < rec.maxActiveWorkOrders
+                                ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                : "bg-rose-50 text-rose-700 border border-rose-200"
+                            }`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${
+                                rec.currentWorkload === 0 ? "bg-emerald-500" : rec.currentWorkload < rec.maxActiveWorkOrders ? "bg-blue-500" : "bg-rose-500"
+                              }`} />
+                              {rec.currentWorkload === 0
+                                ? "Available / Free"
+                                : `Busy (${rec.currentWorkload}/${rec.maxActiveWorkOrders} tasks)`}
+                            </span>
+                            <span className="font-mono text-[11px] font-bold text-neutral-700">
+                              Score: <strong className="text-blue-600">{rec.totalScore}</strong>/100
+                            </span>
+                          </div>
                         </div>
-                        <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-neutral-500">
-                          {rec.reasons.map((r, idx) => (
-                            <span key={idx} className="rounded bg-neutral-100 px-1.5 py-0.5">
+
+                        {/* Route Add-on Banner */}
+                        {rec.isNearbyAddon && rec.nearbyAddonOpportunity && (
+                          <div className="mt-2 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-2 text-xs text-amber-900 flex items-start gap-2">
+                            <Zap className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold text-[11px] uppercase tracking-wide text-amber-800">
+                                Stop Bundling Opportunity:
+                              </span>
+                              <p className="text-[11px] text-amber-950 mt-0.5">
+                                {rec.nearbyAddonOpportunity.description}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Active Work Orders Breakdown */}
+                        {rec.activeWorkOrders && rec.activeWorkOrders.length > 0 && (
+                          <div className="mt-2 rounded-lg bg-neutral-50 border border-neutral-200/70 p-2 text-[11px]">
+                            <div className="font-semibold text-neutral-600 flex items-center gap-1 mb-1">
+                              <Layers className="h-3 w-3 text-neutral-400" />
+                              Active Assigned Tasks ({rec.activeWorkOrders.length}):
+                            </div>
+                            <div className="space-y-1">
+                              {rec.activeWorkOrders.map((wo) => (
+                                <div key={wo.id} className="flex items-center justify-between text-neutral-700 pl-3 border-l-2 border-blue-300">
+                                  <span className="font-mono font-medium">{wo.workOrderNumber}</span>
+                                  <span>{wo.siteName || wo.siteCity || "Client Site"} {wo.distanceKm !== undefined ? `(${wo.distanceKm} km away)` : ""}</span>
+                                  <span className="capitalize px-1.5 py-0.2 rounded text-[10px] bg-neutral-200/70 text-neutral-700">
+                                    {wo.status}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Certified Skills */}
+                        {rec.skills && rec.skills.length > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1">
+                            <span className="text-[10px] uppercase font-bold text-neutral-400 mr-1">Skills:</span>
+                            {rec.skills.map((skill, idx) => (
+                              <span
+                                key={idx}
+                                className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-700 border border-neutral-200"
+                              >
+                                {skill.skillName}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Reasons */}
+                        <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] text-neutral-500">
+                          {rec.reasons.slice(0, 3).map((r, idx) => (
+                            <span key={idx} className="rounded bg-neutral-100/60 px-1.5 py-0.5 text-neutral-600">
                               • {r}
                             </span>
                           ))}
                         </div>
+
+                        {/* Radio Check Indicator */}
+                        <div className="absolute top-3 right-3">
+                          <div className={`h-4 w-4 rounded-full border flex items-center justify-center ${
+                            isSelected ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 bg-white"
+                          }`}>
+                            {isSelected && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                          </div>
+                        </div>
                       </div>
-                    </label>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -517,33 +666,75 @@ export function DispatchBoardView() {
       {/* REASSIGNMENT MODAL */}
       {reassignModalWo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl space-y-4 max-h-[85vh] overflow-y-auto">
             <h2 className="text-base font-bold text-neutral-900">
               Reassign Work Order {reassignModalWo.work_order_number}
             </h2>
             <p className="text-xs text-neutral-500">
-              Reassignment after acceptance requires an audited supervisor justification.
+              Reassignment after acceptance requires an audited supervisor justification. Select an available technician below:
             </p>
 
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-700">New Technician User ID</label>
-              <input
-                type="text"
-                placeholder="Technician UUID"
-                value={newTechId}
-                onChange={(e) => setNewTechId(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-xs font-mono"
-              />
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-neutral-700">Select New Technician</label>
+              <div className="max-h-56 overflow-y-auto space-y-1.5 border border-neutral-200 rounded-xl p-2 bg-neutral-50/50">
+                {techniciansList.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-neutral-500">
+                    No technicians available
+                  </div>
+                ) : (
+                  techniciansList
+                    .filter((t) => t.id !== reassignModalWo.technician_id)
+                    .map((t) => {
+                      const isSelected = newTechId === t.id;
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => setNewTechId(t.id)}
+                          className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition text-xs ${
+                            isSelected
+                              ? "border-blue-600 bg-blue-50 text-blue-900 ring-1 ring-blue-500/20 font-semibold"
+                              : "border-neutral-200 hover:border-neutral-300 bg-white text-neutral-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                              isSelected ? "bg-blue-600 text-white" : "bg-neutral-100 text-neutral-700"
+                            }`}>
+                              {t.full_name?.charAt(0)}
+                            </div>
+                            <div>
+                              <div className="font-bold text-xs flex items-center gap-1.5">
+                                {t.full_name}
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                                  ★ {Number(t.avg_rating || 5.0).toFixed(1)}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-neutral-500 mt-0.5">
+                                {t.phone || t.email} • {t.skills?.slice(0, 2).map((s: any) => s.skill_name || s.skill_code).join(", ")}
+                              </div>
+                            </div>
+                          </div>
+
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-semibold shrink-0 ${
+                            t.current_workload === 0 ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"
+                          }`}>
+                            {t.current_workload === 0 ? "🟢 Free" : `🟡 ${t.current_workload} active`}
+                          </span>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
             </div>
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-neutral-700">Mandatory Justification</label>
               <textarea
                 rows={3}
-                placeholder="Reason for reassignment (e.g., schedule conflict, vehicle breakdown)..."
+                placeholder="Reason for reassignment (e.g., schedule conflict, vehicle breakdown, emergency)..."
                 value={reassignmentReason}
                 onChange={(e) => setReassignmentReason(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-xs"
+                className="w-full rounded-lg border border-neutral-300 p-2.5 text-xs text-neutral-900 focus:border-blue-600 focus:outline-none"
               />
             </div>
 

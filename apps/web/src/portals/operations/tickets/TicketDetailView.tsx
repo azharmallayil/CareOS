@@ -24,7 +24,62 @@ import {
   AlertCircle,
   FileText,
   UserCheck,
+  Calendar,
+  Sparkles,
+  Zap,
+  Check,
+  Star,
+  Phone,
+  Search,
+  Navigation,
+  CheckSquare,
+  Layers,
 } from "lucide-react";
+
+export interface RecommendationItem {
+  technicianId: string;
+  userId?: string;
+  fullName: string;
+  email: string;
+  phone?: string;
+  avgRating: number;
+  status: string;
+  totalScore: number;
+  isEligible: boolean;
+  isAvailable: boolean;
+  currentWorkload: number;
+  maxActiveWorkOrders: number;
+  distanceKm?: number | null;
+  skills: Array<{ skillCode: string; skillName: string; proficiencyLevel?: string; certified?: boolean }>;
+  territories: string[];
+  activeWorkOrders: Array<{
+    id: string;
+    workOrderNumber: string;
+    status: string;
+    priority: string;
+    customerName?: string;
+    siteName?: string;
+    siteCity?: string;
+    distanceKm?: number;
+  }>;
+  isNearbyAddon: boolean;
+  nearbyAddonOpportunity?: {
+    workOrderNumber: string;
+    siteName: string;
+    siteCity?: string;
+    distanceKm: number;
+    description: string;
+  } | null;
+  scoreBreakdown: {
+    skillScore: number;
+    territoryScore: number;
+    availabilityScore: number;
+    workloadScore: number;
+    proximityScore: number;
+    routeAddonScore?: number;
+  };
+  reasons: string[];
+}
 
 export interface TicketDetailData {
   id: string;
@@ -44,6 +99,25 @@ export interface TicketDetailData {
   assigned_to: string | null;
   created_at: string;
   updated_at: string;
+  assignedTechnician?: {
+    id: string;
+    user_id?: string;
+    full_name: string;
+    email: string;
+    phone: string | null;
+    avg_rating?: number;
+    status: string;
+    skills?: Array<{ skill_code: string; skill_name: string }>;
+  } | null;
+  activeWorkOrder?: {
+    id: string;
+    work_order_number: string;
+    status: string;
+    priority: string;
+    scheduled_date: string;
+    scheduled_window_start: string;
+    scheduled_window_end: string;
+  } | null;
   customer_accounts?: {
     id: string;
     name: string;
@@ -127,9 +201,20 @@ export function TicketDetailView() {
   const [isTransitionSubmitting, setIsTransitionSubmitting] = useState(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
 
-  // Assignment Modal State
+  // Enhanced Technician Assignment State
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
-  const [assignUserId, setAssignUserId] = useState("");
+  const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
+  const [isRecsLoading, setIsRecsLoading] = useState(false);
+  const [selectedTechId, setSelectedTechId] = useState<string>("");
+  const [scheduledDate, setScheduledDate] = useState<string>(
+    new Date().toISOString().split("T")[0] || ""
+  );
+  const [scheduledWindow, setScheduledWindow] = useState<{ start: string; end: string }>({
+    start: "09:00:00",
+    end: "12:00:00",
+  });
+  const [searchFilter, setSearchFilter] = useState("");
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState<"all" | "addon" | "available" | "nearby">("all");
   const [isAssignSubmitting, setIsAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
@@ -213,9 +298,77 @@ export function TicketDetailView() {
     }
   };
 
+  const loadTechnicianRecommendations = async (dateOverride?: string) => {
+    if (!token || !tenantId || !id) return;
+    setIsRecsLoading(true);
+    setAssignError(null);
+    const dateToQuery = dateOverride || scheduledDate || new Date().toISOString().split("T")[0];
+    try {
+      const res = await fetch(
+        `/api/v1/dispatch/recommendations?ticketId=${id}&scheduledDate=${dateToQuery}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-Tenant-ID": tenantId,
+          },
+        }
+      );
+      const data = await res.json();
+      if (data.recommendations) {
+        setRecommendations(data.recommendations);
+        if (data.recommendations.length > 0) {
+          setSelectedTechId(data.recommendations[0].technicianId);
+        }
+      }
+    } catch (err: any) {
+      setAssignError(err.message || "Failed to load technician recommendations");
+    } finally {
+      setIsRecsLoading(false);
+    }
+  };
+
   const handleAssignTicket = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!token || !tenantId || !id || !selectedTechId) return;
+
+    setIsAssignSubmitting(true);
+    setAssignError(null);
+
+    try {
+      const res = await fetch("/api/v1/dispatch/assign", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-ID": tenantId,
+        },
+        body: JSON.stringify({
+          ticketId: id,
+          technicianId: selectedTechId,
+          scheduledDate,
+          scheduledWindowStart: scheduledWindow.start,
+          scheduledWindowEnd: scheduledWindow.end,
+          priority: ticket?.priority || "medium",
+        }),
+      });
+
+      const resData = await res.json();
+      if (!res.ok || resData.error) {
+        throw new Error(resData.error?.message || "Failed to dispatch technician");
+      }
+
+      setIsAssignModalOpen(false);
+      fetchTicket();
+    } catch (err: any) {
+      setAssignError(err.message || "Failed to assign technician");
+    } finally {
+      setIsAssignSubmitting(false);
+    }
+  };
+
+  const handleUnassignTicket = async () => {
     if (!token || !tenantId || !id) return;
+    if (!window.confirm("Are you sure you want to unassign the current technician from this ticket?")) return;
 
     setIsAssignSubmitting(true);
     setAssignError(null);
@@ -229,20 +382,21 @@ export function TicketDetailView() {
           "X-Tenant-ID": tenantId,
         },
         body: JSON.stringify({
-          assignedTo: assignUserId ? assignUserId : null,
-          reason: assignUserId ? "Assigned technician via Operations Desk" : "Unassigned ticket",
+          assignedTo: null,
+          reason: "Unassigned via Operations Desk",
         }),
       });
 
       const resData = await res.json();
       if (!res.ok || resData.error) {
-        throw new Error(resData.error?.message || "Assignment failed");
+        throw new Error(resData.error?.message || "Failed to unassign ticket");
       }
 
       setIsAssignModalOpen(false);
+      setSelectedTechId("");
       fetchTicket();
     } catch (err: any) {
-      setAssignError(err.message || "Failed to assign ticket");
+      setAssignError(err.message || "Failed to unassign technician");
     } finally {
       setIsAssignSubmitting(false);
     }
@@ -733,7 +887,7 @@ export function TicketDetailView() {
             )}
           </Card>
 
-          {/* Assignment Placeholder Card */}
+          {/* Assigned Technician Card */}
           <Card className="p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
@@ -741,30 +895,100 @@ export function TicketDetailView() {
               </h3>
               <button
                 onClick={() => {
-                  setAssignUserId(ticket.assigned_to || "");
                   setIsAssignModalOpen(true);
+                  loadTechnicianRecommendations();
                 }}
-                className="text-xs font-medium text-blue-600 hover:underline"
+                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
               >
-                {ticket.assigned_to ? "Reassign" : "Assign"}
+                <Sparkles className="h-3 w-3 text-amber-500" />
+                {ticket.assigned_to || ticket.assignedTechnician ? "Change / Reassign" : "Assign Technician"}
               </button>
             </div>
 
             <div className="text-sm">
-              {ticket.assigned_to ? (
-                <div className="flex items-center gap-2">
-                  <div className="h-7 w-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs">
-                    T
+              {ticket.assignedTechnician ? (
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-9 w-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shadow-xs border border-blue-200">
+                        {ticket.assignedTechnician.full_name.charAt(0)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-xs text-neutral-900">
+                            {ticket.assignedTechnician.full_name}
+                          </span>
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.2 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                            ★ {Number(ticket.assignedTechnician.avg_rating || 5.0).toFixed(1)}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-neutral-500">
+                          {ticket.assignedTechnician.phone || ticket.assignedTechnician.email}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="font-mono text-xs text-neutral-800">{ticket.assigned_to}</span>
-                    <p className="text-[11px] text-neutral-400">Field Technician</p>
+
+                  {ticket.activeWorkOrder && (
+                    <div className="rounded-lg bg-blue-50/70 p-2.5 text-xs border border-blue-100 space-y-1">
+                      <div className="flex items-center justify-between font-mono font-bold text-[11px] text-blue-700">
+                        <span>{ticket.activeWorkOrder.work_order_number}</span>
+                        <span className="uppercase text-[10px] bg-blue-200/60 px-1.5 py-0.5 rounded text-blue-900 font-sans">
+                          {ticket.activeWorkOrder.status}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-neutral-600 flex items-center gap-1">
+                        <Calendar className="h-3 w-3 text-neutral-400" />
+                        Scheduled: {ticket.activeWorkOrder.scheduled_date} (
+                        {ticket.activeWorkOrder.scheduled_window_start?.slice(0, 5)} -{" "}
+                        {ticket.activeWorkOrder.scheduled_window_end?.slice(0, 5)})
+                      </div>
+                    </div>
+                  )}
+
+                  {ticket.assignedTechnician.skills && ticket.assignedTechnician.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {ticket.assignedTechnician.skills.map((s: any, idx: number) => (
+                        <span
+                          key={idx}
+                          className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600"
+                        >
+                          {s.skill_name || s.skill_code}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : ticket.assigned_to ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-neutral-100 text-neutral-700 flex items-center justify-center font-bold text-xs">
+                      T
+                    </div>
+                    <div>
+                      <span className="font-mono text-xs text-neutral-800">{ticket.assigned_to}</span>
+                      <p className="text-[11px] text-neutral-400">Assigned Technician</p>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-amber-700 italic bg-amber-50 p-2 rounded border border-amber-100">
-                  Unassigned • Ready for dispatch
-                </p>
+                <div className="text-center py-3 bg-amber-50/60 rounded-lg border border-dashed border-amber-200">
+                  <UserCheck className="h-6 w-6 text-amber-500 mx-auto mb-1 opacity-70" />
+                  <p className="text-xs font-semibold text-amber-900">No Technician Assigned</p>
+                  <p className="text-[11px] text-amber-700 mt-0.5">
+                    Ticket is ready for smart dispatch recommendation.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setIsAssignModalOpen(true);
+                      loadTechnicianRecommendations();
+                    }}
+                    className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                    Assign Technician
+                  </button>
+                </div>
               )}
             </div>
           </Card>
@@ -850,49 +1074,361 @@ export function TicketDetailView() {
         </form>
       </Modal>
 
-      {/* Assignment Modal */}
+      {/* Smart Technician Assignment & Dispatch Modal */}
       <Modal
         isOpen={isAssignModalOpen}
         onClose={() => setIsAssignModalOpen(false)}
-        title="Assign Field Technician"
-        description="Assign this ticket to an authorized technician or operations user."
-        maxWidth="sm"
+        title="Field Technician Dispatch & Route Optimization"
+        description="Select certified field technician, evaluate route proximity, and schedule work order."
+        maxWidth="3xl"
       >
-        <form onSubmit={handleAssignTicket} className="space-y-4">
+        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
           {assignError && (
-            <div className="rounded bg-rose-50 p-2 text-xs text-rose-700 border border-rose-200">
-              {assignError}
+            <div className="rounded-lg bg-rose-50 p-2.5 text-xs text-rose-700 border border-rose-200 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{assignError}</span>
             </div>
           )}
 
-          <div>
-            <label className="block text-xs font-semibold text-neutral-700 mb-1">Technician User ID (UUID)</label>
-            <input
-              type="text"
-              value={assignUserId}
-              onChange={(e) => setAssignUserId(e.target.value)}
-              placeholder="Enter User UUID or leave blank to unassign"
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-xs font-mono text-neutral-900 focus:border-blue-600 focus:outline-none"
-            />
+          {/* Ticket Target Summary Banner */}
+          <div className="rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50/70 to-indigo-50/50 p-3 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200/40 pb-2 mb-2">
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-bold text-blue-700">{ticket.ticket_number}</span>
+                <span className="font-semibold text-neutral-900">{ticket.title}</span>
+                <Badge variant={ticket.priority === "critical" ? "error" : ticket.priority === "high" ? "warning" : "neutral"}>
+                  {ticket.priority.toUpperCase()}
+                </Badge>
+              </div>
+              <span className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-neutral-600 border border-neutral-200 uppercase">
+                {ticket.coverage_type}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-neutral-600">
+              <div className="flex items-center gap-1.5">
+                <Building2 className="h-3.5 w-3.5 text-neutral-400" />
+                <span>Customer: <strong>{ticket.customer_accounts?.name || "Direct Fleet"}</strong></span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 text-neutral-400" />
+                <span>Site: <strong>{ticket.customer_sites?.name || "Unspecified"}</strong> ({ticket.customer_sites?.city || "Local"})</span>
+              </div>
+              {ticket.assets && (
+                <div className="flex items-center gap-1.5">
+                  <Truck className="h-3.5 w-3.5 text-neutral-400" />
+                  <span>Asset: <strong>{ticket.assets.fleet_number || ticket.assets.make}</strong></span>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-200">
+          {/* Scheduling Controls */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-neutral-50 p-3 rounded-xl border border-neutral-200">
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
+                Scheduled Service Date
+              </label>
+              <input
+                type="date"
+                value={scheduledDate}
+                onChange={(e) => {
+                  setScheduledDate(e.target.value);
+                  loadTechnicianRecommendations(e.target.value);
+                }}
+                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-900 focus:border-blue-600 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
+                Time Window
+              </label>
+              <select
+                value={`${scheduledWindow.start}-${scheduledWindow.end}`}
+                onChange={(e) => {
+                  const [start, end] = e.target.value.split("-");
+                  if (start && end) setScheduledWindow({ start, end });
+                }}
+                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-900 focus:border-blue-600 focus:outline-none"
+              >
+                <option value="09:00:00-12:00:00">Morning Shift (09:00 - 12:00)</option>
+                <option value="13:00:00-17:00:00">Afternoon Shift (13:00 - 17:00)</option>
+                <option value="17:00:00-21:00:00">Evening Shift (17:00 - 21:00)</option>
+                <option value="08:00:00-20:00:00">All Day / Priority Window (08:00 - 20:00)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Search & Category Filter Tabs */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 text-xs">
+              <button
+                type="button"
+                onClick={() => setActiveCategoryFilter("all")}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition ${
+                  activeCategoryFilter === "all"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                }`}
+              >
+                All Technicians ({recommendations.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveCategoryFilter("addon")}
+                className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition ${
+                  activeCategoryFilter === "addon"
+                    ? "bg-amber-600 text-white shadow-xs"
+                    : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/60"
+                }`}
+              >
+                <Zap className="h-3 w-3" />
+                Smart Route Add-ons ({recommendations.filter((r) => r.isNearbyAddon).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveCategoryFilter("available")}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition ${
+                  activeCategoryFilter === "available"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60"
+                }`}
+              >
+                Free & Ready ({recommendations.filter((r) => r.currentWorkload === 0 && r.isEligible).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveCategoryFilter("nearby")}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition ${
+                  activeCategoryFilter === "nearby"
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/60"
+                }`}
+              >
+                Nearby &lt;15 km ({recommendations.filter((r) => r.distanceKm !== null && r.distanceKm !== undefined && r.distanceKm <= 15).length})
+              </button>
+            </div>
+
+            <div className="relative min-w-[200px]">
+              <Search className="h-3.5 w-3.5 text-neutral-400 absolute left-2.5 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search name or skill..."
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                className="w-full rounded-lg border border-neutral-300 pl-8 pr-3 py-1.5 text-xs text-neutral-900 placeholder:text-neutral-400 focus:border-blue-600 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Technician Cards List */}
+          <div className="space-y-2.5">
+            {isRecsLoading ? (
+              <div className="py-12 text-center text-xs text-neutral-500">
+                <RefreshCw className="h-5 w-5 animate-spin mx-auto text-blue-600 mb-2" />
+                Evaluating technician certified skills, real-time GPS locations, active workloads, and route proximity...
+              </div>
+            ) : recommendations.length === 0 ? (
+              <div className="py-8 text-center text-xs text-neutral-500 bg-neutral-50 rounded-xl border border-neutral-200">
+                No technician profiles registered for this tenant.
+              </div>
+            ) : (
+              recommendations
+                .filter((rec) => {
+                  if (activeCategoryFilter === "addon" && !rec.isNearbyAddon) return false;
+                  if (activeCategoryFilter === "available" && (rec.currentWorkload > 0 || !rec.isEligible)) return false;
+                  if (activeCategoryFilter === "nearby" && (rec.distanceKm === null || rec.distanceKm === undefined || rec.distanceKm > 15)) return false;
+                  if (searchFilter.trim()) {
+                    const q = searchFilter.toLowerCase();
+                    const matchesName = rec.fullName.toLowerCase().includes(q);
+                    const matchesSkill = rec.skills.some((s) => s.skillName.toLowerCase().includes(q) || s.skillCode.toLowerCase().includes(q));
+                    return matchesName || matchesSkill;
+                  }
+                  return true;
+                })
+                .map((rec) => {
+                  const isSelected = selectedTechId === rec.technicianId;
+                  return (
+                    <div
+                      key={rec.technicianId}
+                      onClick={() => setSelectedTechId(rec.technicianId)}
+                      className={`relative rounded-xl border p-3.5 cursor-pointer transition text-xs ${
+                        isSelected
+                          ? "border-blue-600 bg-blue-50/40 ring-2 ring-blue-500/20 shadow-xs"
+                          : "border-neutral-200 hover:border-neutral-300 bg-white"
+                      }`}
+                    >
+                      {/* Top Row: Info, Avatar, Rating, Contact, Score */}
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0 border ${
+                            isSelected ? "bg-blue-600 text-white border-blue-700" : "bg-neutral-100 text-neutral-700 border-neutral-200"
+                          }`}>
+                            {rec.fullName.charAt(0)}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-sm text-neutral-900">{rec.fullName}</span>
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                                ★ {rec.avgRating.toFixed(1)}
+                              </span>
+                              {rec.isNearbyAddon && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                                  <Zap className="h-2.5 w-2.5 fill-white" />
+                                  ROUTE ADD-ON OPPORTUNITY
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-neutral-500 text-[11px] mt-0.5">
+                              {rec.phone && (
+                                <span className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3 text-neutral-400" />
+                                  {rec.phone}
+                                </span>
+                              )}
+                              {rec.distanceKm !== null && rec.distanceKm !== undefined ? (
+                                <span className="flex items-center gap-1 font-semibold text-neutral-700">
+                                  <MapPin className="h-3 w-3 text-rose-500" />
+                                  📍 {rec.distanceKm} km to site
+                                </span>
+                              ) : (
+                                <span className="text-neutral-400">
+                                  Territory: {rec.territories.join(", ") || "General"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Status Badge & Score */}
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between gap-1 shrink-0">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold ${
+                            rec.currentWorkload === 0
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : rec.currentWorkload < rec.maxActiveWorkOrders
+                              ? "bg-blue-50 text-blue-700 border border-blue-200"
+                              : "bg-rose-50 text-rose-700 border border-rose-200"
+                          }`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${
+                              rec.currentWorkload === 0 ? "bg-emerald-500" : rec.currentWorkload < rec.maxActiveWorkOrders ? "bg-blue-500" : "bg-rose-500"
+                            }`} />
+                            {rec.currentWorkload === 0
+                              ? "Available / Free"
+                              : `Busy (${rec.currentWorkload}/${rec.maxActiveWorkOrders} tasks)`}
+                          </span>
+                          <span className="font-mono text-[11px] font-bold text-neutral-700">
+                            Match Score: <strong className="text-blue-600">{rec.totalScore}</strong>/100
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Smart Route Add-on Banner (If applicable) */}
+                      {rec.isNearbyAddon && rec.nearbyAddonOpportunity && (
+                        <div className="mt-2.5 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-2 text-xs text-amber-900 flex items-start gap-2">
+                          <Zap className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-[11px] uppercase tracking-wide text-amber-800">
+                              Proximity Route Clustering Opportunity:
+                            </span>
+                            <p className="text-[11px] text-amber-950 mt-0.5">
+                              {rec.nearbyAddonOpportunity.description}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Active Work Orders Breakdown (If busy) */}
+                      {rec.activeWorkOrders && rec.activeWorkOrders.length > 0 && (
+                        <div className="mt-2.5 rounded-lg bg-neutral-50/80 border border-neutral-200/80 p-2 text-[11px]">
+                          <div className="font-semibold text-neutral-600 flex items-center gap-1 mb-1">
+                            <Layers className="h-3 w-3 text-neutral-400" />
+                            Ongoing Assigned Tasks ({rec.activeWorkOrders.length}):
+                          </div>
+                          <div className="space-y-1">
+                            {rec.activeWorkOrders.map((wo) => (
+                              <div key={wo.id} className="flex items-center justify-between text-neutral-700 pl-4 border-l-2 border-blue-300">
+                                <span className="font-mono font-medium">{wo.workOrderNumber}</span>
+                                <span>{wo.siteName || wo.siteCity || "Client Site"} {wo.distanceKm !== undefined ? `(${wo.distanceKm} km away)` : ""}</span>
+                                <span className="capitalize px-1.5 py-0.2 rounded text-[10px] bg-neutral-200/70 text-neutral-700 font-sans">
+                                  {wo.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Certified Skills Badges */}
+                      {rec.skills && rec.skills.length > 0 && (
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1">
+                          <span className="text-[10px] uppercase font-bold text-neutral-400 mr-1">Certified Skills:</span>
+                          {rec.skills.map((skill, idx) => (
+                            <span
+                              key={idx}
+                              className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-700 border border-neutral-200"
+                            >
+                              {skill.skillName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Score Breakdown Reasons */}
+                      <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-neutral-500">
+                        {rec.reasons.slice(0, 3).map((r, idx) => (
+                          <span key={idx} className="rounded bg-neutral-100/60 px-1.5 py-0.5 text-neutral-600">
+                            • {r}
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Radio Selection Indicator */}
+                      <div className="absolute top-3.5 right-3.5">
+                        <div className={`h-4 w-4 rounded-full border flex items-center justify-center ${
+                          isSelected ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 bg-white"
+                        }`}>
+                          {isSelected && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+            )}
+          </div>
+        </div>
+
+        {/* Modal Footer */}
+        <div className="flex items-center justify-between pt-4 border-t border-neutral-200 mt-4">
+          <div>
+            {(ticket.assigned_to || ticket.assignedTechnician) && (
+              <button
+                type="button"
+                onClick={handleUnassignTicket}
+                disabled={isAssignSubmitting}
+                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+              >
+                Unassign Ticket
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setIsAssignModalOpen(false)}
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50"
+              className="rounded-lg border border-neutral-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50"
             >
               Cancel
             </button>
             <button
-              type="submit"
-              disabled={isAssignSubmitting}
+              type="button"
+              onClick={handleAssignTicket}
+              disabled={isAssignSubmitting || !selectedTechId}
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
             >
-              {isAssignSubmitting ? "Saving..." : "Save Assignment"}
+              <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+              {isAssignSubmitting ? "Dispatching..." : "Confirm Assignment & Schedule Work Order"}
             </button>
           </div>
-        </form>
+        </div>
       </Modal>
     </div>
   );

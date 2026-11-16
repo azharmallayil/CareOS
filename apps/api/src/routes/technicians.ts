@@ -54,6 +54,7 @@ export const technicianRoutes: FastifyPluginAsync = async (fastify) => {
         .from("technicians")
         .select(`
           id,
+          user_id,
           employee_id,
           full_name,
           email,
@@ -80,7 +81,26 @@ export const technicianRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(500).send({ error: { code: "DB_ERROR", message: error.message } });
       }
 
-      return reply.send({ technicians: data || [] });
+      // Compute active workload count for each technician
+      const { data: activeWOs } = await adminClient
+        .from("work_orders")
+        .select("technician_id")
+        .eq("tenant_id", tenantId)
+        .in("status", ["assigned", "accepted", "en_route", "on_site", "in_progress"]);
+
+      const workloadMap = new Map<string, number>();
+      (activeWOs || []).forEach((wo: any) => {
+        if (wo.technician_id) {
+          workloadMap.set(wo.technician_id, (workloadMap.get(wo.technician_id) || 0) + 1);
+        }
+      });
+
+      const enriched = (data || []).map((t: any) => ({
+        ...t,
+        current_workload: workloadMap.get(t.id) || 0,
+      }));
+
+      return reply.send({ technicians: enriched });
     }
   );
 

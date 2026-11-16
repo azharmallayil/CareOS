@@ -93,7 +93,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
           id,
           priority,
           category:ticket_categories(code),
-          site:customer_sites(city, postal_code, latitude, longitude)
+          site:customer_sites(id, name, city, postal_code, latitude, longitude)
         `)
         .eq("tenant_id", tenantId)
         .eq("id", ticketId)
@@ -107,6 +107,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
         .from("technicians")
         .select(`
           id,
+          user_id,
           full_name,
           email,
           phone,
@@ -116,7 +117,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
           last_location_lat,
           last_location_lng,
           last_location_updated_at,
-          skills:technician_skills(skill_code),
+          skills:technician_skills(skill_code, skill_name, proficiency_level, certified),
           territories:technician_territories(
             territory:service_territories(city, name)
           )
@@ -129,14 +130,37 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { data: activeWOs } = await adminClient
         .from("work_orders")
-        .select("technician_id")
+        .select(`
+          id,
+          work_order_number,
+          status,
+          priority,
+          scheduled_date,
+          scheduled_window_start,
+          scheduled_window_end,
+          technician_id,
+          site:customer_sites(id, name, city, latitude, longitude),
+          customer:customer_accounts(id, name)
+        `)
         .eq("tenant_id", tenantId)
         .in("status", ["assigned", "accepted", "en_route", "on_site", "in_progress"]);
 
-      const workloadMap = new Map<string, number>();
+      const techActiveWOsMap = new Map<string, any[]>();
       (activeWOs || []).forEach((wo: any) => {
         if (wo.technician_id) {
-          workloadMap.set(wo.technician_id, (workloadMap.get(wo.technician_id) || 0) + 1);
+          const list = techActiveWOsMap.get(wo.technician_id) || [];
+          list.push({
+            id: wo.id,
+            workOrderNumber: wo.work_order_number,
+            status: wo.status,
+            priority: wo.priority,
+            customerName: wo.customer?.name,
+            siteName: wo.site?.name,
+            siteCity: wo.site?.city,
+            latitude: wo.site?.latitude ? Number(wo.site.latitude) : undefined,
+            longitude: wo.site?.longitude ? Number(wo.site.longitude) : undefined,
+          });
+          techActiveWOsMap.set(wo.technician_id, list);
         }
       });
 
@@ -154,22 +178,32 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       const candidates: TechnicianCandidate[] = (techs || []).map((t: any) => {
-        const skills = (t.skills || []).map((s: any) => s.skill_code);
+        const skillDetails = (t.skills || []).map((s: any) => ({
+          skillCode: s.skill_code,
+          skillName: s.skill_name || s.skill_code.replace(/_/g, " "),
+          proficiencyLevel: s.proficiency_level,
+          certified: s.certified !== false,
+        }));
+        const skills = skillDetails.map((s: any) => s.skillCode);
         const territories = (t.territories || []).map((tr: any) => tr.territory?.city || "");
+        const activeWorkOrders = techActiveWOsMap.get(t.id) || [];
 
         return {
           id: t.id,
+          userId: t.user_id,
           fullName: t.full_name,
           email: t.email,
           phone: t.phone || undefined,
           status: t.status,
           maxActiveWorkOrders: t.max_active_work_orders || 4,
-          currentWorkload: workloadMap.get(t.id) || 0,
+          currentWorkload: activeWorkOrders.length,
           avgRating: Number(t.avg_rating) || 5.0,
           skills,
+          skillDetails,
           territories,
           workingToday: true,
           onLeave: leaveSet.has(t.id),
+          activeWorkOrders,
           lastLocation:
             t.last_location_lat && t.last_location_lng
               ? {
@@ -188,6 +222,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
         scheduledDate: scheduledDate ?? new Date().toISOString().slice(0, 10),
         customerSite: (ticket as any).site
           ? {
+              name: (ticket as any).site.name || undefined,
               city: (ticket as any).site.city || undefined,
               postalCode: (ticket as any).site.postal_code || undefined,
               latitude: (ticket as any).site.latitude ? Number((ticket as any).site.latitude) : undefined,
@@ -201,6 +236,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.send({
         ticketId,
         scheduledDate,
+        ticketSite: (ticket as any).site,
         recommendations,
       });
     }
@@ -244,7 +280,7 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { data: tech } = await adminClient
         .from("technicians")
-        .select("id, full_name")
+        .select("id, full_name, user_id")
         .eq("tenant_id", tenantId)
         .eq("id", technicianId)
         .single();
@@ -313,7 +349,11 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
 
       await adminClient
         .from("tickets")
-        .update({ status: "scheduled", updated_at: new Date().toISOString() })
+        .update({
+          status: "scheduled",
+          assigned_to: tech.user_id || tech.id,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", ticketId);
 
       await adminClient.from("ticket_events").insert({
@@ -399,6 +439,24 @@ export const dispatchRoutes: FastifyPluginAsync = async (fastify) => {
         .from("work_orders")
         .update(updatePayload)
         .eq("id", workOrderId);
+
+      // Keep ticket assigned_to in sync
+      const { data: newTech } = await adminClient
+        .from("technicians")
+        .select("id, user_id, full_name")
+        .eq("tenant_id", tenantId)
+        .eq("id", newTechnicianId)
+        .maybeSingle();
+
+      if (newTech) {
+        await adminClient
+          .from("tickets")
+          .update({
+            assigned_to: newTech.user_id || newTech.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", wo.ticket_id);
+      }
 
       await adminClient.from("ticket_events").insert({
         tenant_id: tenantId,

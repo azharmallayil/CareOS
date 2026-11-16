@@ -52,6 +52,7 @@ const createTicketSchema = z.object({
   priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
   coverageType: z.enum(["paid", "warranty", "free_service", "contract"]).default("paid"),
   reportedVia: z.enum(["portal", "phone", "email", "chat", "automated_telematics"]).default("portal"),
+  attachments: z.array(z.any()).default([]),
 });
 
 const updateTicketSchema = z.object({
@@ -84,6 +85,15 @@ const ticketEventSchema = z.object({
   metadata: z.record(z.any()).default({}),
 });
 
+const customerApprovalSchema = z.object({
+  decision: z.enum(["approve", "reject"]),
+  rating: z.number().int().min(1).max(5).optional(),
+  feedback: z.string().max(2000).optional(),
+  photos: z.array(z.any()).default([]),
+  reworkReason: z.string().max(1000).optional(),
+  customerSignatureName: z.string().max(100).optional(),
+});
+
 // Allowed status transitions mapping
 const VALID_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   draft: ["submitted", "cancelled"],
@@ -101,8 +111,8 @@ const VALID_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   in_progress: ["service_completed", "on_hold", "cancelled"],
   on_hold: ["in_progress", "under_review", "ready_for_assignment", "cancelled"],
   service_completed: ["awaiting_operations_verification", "awaiting_customer_confirmation", "resolved"],
-  awaiting_operations_verification: ["awaiting_customer_confirmation", "resolved", "in_progress"],
-  awaiting_customer_confirmation: ["resolved", "closed", "in_progress"],
+  awaiting_operations_verification: ["awaiting_customer_confirmation", "resolved", "in_progress", "closed"],
+  awaiting_customer_confirmation: ["resolved", "closed", "in_progress", "awaiting_operations_verification", "under_review"],
   resolved: ["closed", "under_review"],
   closed: [], // terminal state
   cancelled: [], // terminal state
@@ -623,6 +633,21 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify) => {
       metadata: { priority: payload.priority },
     });
 
+    // 6. Record attachments/photos event if customer provided issue evidence
+    if (payload.attachments && payload.attachments.length > 0) {
+      await client.from("ticket_events").insert({
+        tenant_id: tenantId,
+        ticket_id: ticket.id,
+        event_type: "comment",
+        actor_id: userId,
+        actor_type: portal === "customer" ? "customer" : "staff",
+        is_internal: false,
+        body: `Customer uploaded ${payload.attachments.length} initial issue photo(s) / evidence for fleet review.`,
+        attachments: payload.attachments,
+        metadata: { is_initial_evidence: true, photoCount: payload.attachments.length },
+      });
+    }
+
     await logAudit(tenantId, userId, "ticket.created", "ticket", ticket.id, null, ticket);
 
     return reply.status(201).send({ data: ticket });
@@ -1142,5 +1167,214 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify) => {
       .eq("id", id);
 
     return reply.status(201).send({ data: event });
+  });
+
+  // =========================================================================
+  // 9. CUSTOMER SERVICE APPROVAL & QUALITY RATING
+  // =========================================================================
+
+  // POST /api/v1/tickets/:id/customer-approval
+  fastify.post("/:id/customer-approval", async (request, reply) => {
+    const tenantId = request.auth!.activeTenantId!;
+    const userId = request.auth!.user.id;
+    const portal = request.auth!.activeMembership?.portal || "operations";
+    const isPlatformAdmin = Boolean(request.auth!.isPlatformAdmin);
+    const { id } = request.params as { id: string };
+
+    const parseResult = customerApprovalSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: { code: "VALIDATION_ERROR", message: "Invalid approval payload", details: parseResult.error.flatten() },
+      });
+    }
+
+    const { decision, rating, feedback, photos, reworkReason, customerSignatureName } = parseResult.data;
+    const client = adminClient ?? request.userClient!;
+
+    // 1. Fetch ticket to verify tenant & customer account access
+    const { data: ticket, error: ticketErr } = await client
+      .from("tickets")
+      .select("id, tenant_id, ticket_number, title, customer_account_id, status, assigned_to")
+      .eq("tenant_id", tenantId)
+      .eq("id", id)
+      .maybeSingle();
+
+    if (ticketErr || !ticket) {
+      return reply.status(404).send({
+        error: { code: "TICKET_NOT_FOUND", message: "Ticket not found" },
+      });
+    }
+
+    if (!isPlatformAdmin && portal === "customer") {
+      const linkedIds = await getLinkedCustomerAccounts(tenantId, userId);
+      if (!linkedIds.includes(ticket.customer_account_id)) {
+        return reply.status(403).send({
+          error: { code: "FORBIDDEN", message: "You can only approve tickets for customer accounts linked to your user" },
+        });
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+
+    if (decision === "approve") {
+      const targetRating = rating ?? 5;
+      const targetFeedback = feedback?.trim() || "Service approved satisfactorily by customer.";
+
+      // 2. Transition ticket to awaiting_operations_verification (submitted to fleet company for final verification)
+      const newStatus = "awaiting_operations_verification";
+      await client
+        .from("tickets")
+        .update({
+          status: newStatus,
+          resolved_at: nowIso,
+          updated_at: nowIso,
+        })
+        .eq("tenant_id", tenantId)
+        .eq("id", id);
+
+      // Record ticket status history
+      await client.from("ticket_status_history").insert({
+        tenant_id: tenantId,
+        ticket_id: id,
+        from_status: ticket.status,
+        to_status: newStatus,
+        changed_by: userId,
+        reason: `Customer approved service completion with ${targetRating}★ rating`,
+        metadata: { rating: targetRating, feedback: targetFeedback, decision: "approve" },
+      });
+
+      // 3. Update active work order with signature and rating metadata
+      const { data: activeWos } = await client
+        .from("work_orders")
+        .select("id, technician_id, work_order_number")
+        .eq("tenant_id", tenantId)
+        .eq("ticket_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const activeWo = activeWos?.[0];
+      if (activeWo) {
+        await client
+          .from("work_orders")
+          .update({
+            status: "completed",
+            customer_signature_name: customerSignatureName || "Authorized Customer",
+            customer_signature_timestamp: nowIso,
+            updated_at: nowIso,
+          })
+          .eq("id", activeWo.id);
+
+        // Update technician's average rating in public.technicians if technician is assigned
+        if (activeWo.technician_id) {
+          const { data: tech } = await client
+            .from("technicians")
+            .select("avg_rating")
+            .eq("tenant_id", tenantId)
+            .eq("id", activeWo.technician_id)
+            .maybeSingle();
+
+          if (tech) {
+            const currentRating = Number(tech.avg_rating) || 5.0;
+            // Running average
+            const updatedRating = Number(((currentRating * 4 + targetRating) / 5).toFixed(2));
+            await client
+              .from("technicians")
+              .update({ avg_rating: updatedRating, updated_at: nowIso })
+              .eq("id", activeWo.technician_id);
+          }
+        }
+      }
+
+      // 4. Log customer review event to timeline
+      const starsDisplay = "★".repeat(targetRating) + "☆".repeat(5 - targetRating);
+      await client.from("ticket_events").insert({
+        tenant_id: tenantId,
+        ticket_id: id,
+        event_type: "inspection",
+        actor_id: userId,
+        actor_type: "customer",
+        is_internal: false,
+        body: `Customer Approved Service: ${starsDisplay} (${targetRating}/5 Stars)\nFeedback: "${targetFeedback}"${customerSignatureName ? `\nSigned by: ${customerSignatureName}` : ""}`,
+        attachments: photos,
+        metadata: {
+          decision: "approve",
+          rating: targetRating,
+          feedback: targetFeedback,
+          signature: customerSignatureName,
+          photoCount: photos.length,
+        },
+      });
+
+      // 5. Send notification to fleet company operations
+      await client.from("notifications").insert({
+        tenant_id: tenantId,
+        recipient_id: userId,
+        title: `Service Approved: ${ticket.ticket_number}`,
+        body: `Customer provided ${targetRating}★ rating and approved work for ${ticket.title}. Submitted to fleet operations for final review.`,
+        category: "status_change",
+        link_url: `/operations/tickets`,
+      });
+
+      await logAudit(tenantId, userId, "ticket.customer_approved", "ticket", id, { status: ticket.status }, { status: newStatus, rating: targetRating });
+
+      return reply.send({
+        success: true,
+        message: "Service work approved and submitted to fleet company.",
+        status: newStatus,
+        rating: targetRating,
+      });
+    } else {
+      // Decision is "reject" / Request Rework
+      const reason = reworkReason?.trim() || "Customer requested rework on completed service.";
+      const newStatus = "under_review";
+
+      await client
+        .from("tickets")
+        .update({
+          status: newStatus,
+          updated_at: nowIso,
+        })
+        .eq("tenant_id", tenantId)
+        .eq("id", id);
+
+      await client.from("ticket_status_history").insert({
+        tenant_id: tenantId,
+        ticket_id: id,
+        from_status: ticket.status,
+        to_status: newStatus,
+        changed_by: userId,
+        reason: `Customer requested rework: ${reason}`,
+        metadata: { decision: "reject", reworkReason: reason },
+      });
+
+      await client.from("ticket_events").insert({
+        tenant_id: tenantId,
+        ticket_id: id,
+        event_type: "inspection",
+        actor_id: userId,
+        actor_type: "customer",
+        is_internal: false,
+        body: `Customer Requested Rework (Service Not Accepted)\nReason: "${reason}"`,
+        attachments: photos,
+        metadata: { decision: "reject", reworkReason: reason },
+      });
+
+      await client.from("notifications").insert({
+        tenant_id: tenantId,
+        recipient_id: userId,
+        title: `Rework Requested: ${ticket.ticket_number}`,
+        body: `Customer reported an issue with completed work: ${reason}. Requires fleet operations review.`,
+        category: "status_change",
+        link_url: `/operations/tickets`,
+      });
+
+      await logAudit(tenantId, userId, "ticket.rework_requested", "ticket", id, { status: ticket.status }, { status: newStatus, reason });
+
+      return reply.send({
+        success: true,
+        message: "Rework request submitted. Fleet operations has been notified.",
+        status: newStatus,
+      });
+    }
   });
 };

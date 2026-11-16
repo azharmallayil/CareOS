@@ -19,6 +19,8 @@ import {
   Upload,
   ChevronRight,
   X,
+  Image,
+  AlertCircle,
 } from "lucide-react";
 
 const APPROVED_REASONS = [
@@ -28,6 +30,16 @@ const APPROVED_REASONS = [
   { value: "vehicle_breakdown", label: "Service Vehicle Breakdown" },
   { value: "emergency", label: "Personal / Medical Emergency" },
   { value: "other", label: "Other (Requires Explanation)" },
+];
+
+const DELAY_REASONS = [
+  "Heavy Traffic / Road Congestion",
+  "Previous Job Overrun / Extended Work",
+  "Parts / Tools Retrieval en Route",
+  "Adverse Weather / Road Conditions",
+  "Service Vehicle Breakdown / Mechanical Issue",
+  "Customer Site Access / Gate Delay",
+  "Other Operational Delay",
 ];
 
 export default function TechnicianPortal() {
@@ -54,6 +66,16 @@ function TechnicianOverview() {
   const [rejectionExplanation, setRejectionExplanation] = useState("");
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [locationStatus, setLocationStatus] = useState<string>("Ready");
+
+  // Delay Notification States
+  const [delayWo, setDelayWo] = useState<any | null>(null);
+  const [delayMinutes, setDelayMinutes] = useState<number>(30);
+  const [delayReason, setDelayReason] = useState<string>("Heavy Traffic / Road Congestion");
+  const [delayNotes, setDelayNotes] = useState<string>("");
+  const [delayEta, setDelayEta] = useState<string>("");
+  const [isDelaySubmitting, setIsDelaySubmitting] = useState(false);
+  const [delayError, setDelayError] = useState<string | null>(null);
+  const [delaySuccessMsg, setDelaySuccessMsg] = useState<string | null>(null);
 
   const fetchWorkOrders = async () => {
     if (!token || !tenantId) return;
@@ -142,6 +164,47 @@ function TechnicianOverview() {
       }
     } catch (err) {
       console.error("Stage transition error", err);
+    }
+  };
+
+  const handleNotifyDelay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!delayWo || !token || !tenantId) return;
+
+    setIsDelaySubmitting(true);
+    setDelayError(null);
+    try {
+      const res = await fetch(`/api/v1/work-orders/${delayWo.id}/notify-delay`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-ID": tenantId,
+          "X-Portal": "technician",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          delayMinutes: Number(delayMinutes),
+          delayReason,
+          notes: delayNotes.trim() ? delayNotes.trim() : undefined,
+          newEta: delayEta.trim() ? delayEta.trim() : undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || "Failed to notify delay");
+      }
+
+      setDelaySuccessMsg(`Delay of +${delayMinutes}m reported. Operations and customer have been alerted.`);
+      setTimeout(() => {
+        setDelaySuccessMsg(null);
+        setDelayWo(null);
+      }, 2000);
+      fetchWorkOrders();
+    } catch (err: any) {
+      setDelayError(err.message || "Failed to notify delay");
+    } finally {
+      setIsDelaySubmitting(false);
     }
   };
 
@@ -301,10 +364,80 @@ function TechnicianOverview() {
                   )}
                 </div>
 
+                {/* Customer Problem Description */}
+                {wo.ticket?.description && (
+                  <div className="rounded-xl bg-neutral-50 p-3 border border-neutral-200/80 text-xs text-neutral-700">
+                    <span className="font-semibold text-neutral-900 block mb-0.5">Customer Problem Description:</span>
+                    <p className="whitespace-pre-wrap">{wo.ticket.description}</p>
+                  </div>
+                )}
+
+                {/* Customer Uploaded Photos & Evidence */}
+                {(() => {
+                  const customerPhotos = (wo.ticket?.events || []).flatMap((ev: any) =>
+                    Array.isArray(ev.attachments) ? ev.attachments : []
+                  );
+                  if (customerPhotos.length === 0) return null;
+                  return (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-xs font-semibold text-neutral-800 flex items-center gap-1.5">
+                        <Image className="h-3.5 w-3.5 text-blue-600" />
+                        Customer Issue Photos & Evidence ({customerPhotos.length})
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {customerPhotos.map((photo: any, idx: number) => (
+                          <a
+                            key={idx}
+                            href={photo.url || photo.dataUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group relative block aspect-video rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 hover:border-blue-400 transition"
+                          >
+                            <img
+                              src={photo.url || photo.dataUrl}
+                              alt={photo.name || `Customer Photo ${idx + 1}`}
+                              className="h-full w-full object-cover group-hover:scale-105 transition duration-200"
+                            />
+                            <span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[10px] px-1.5 py-0.5 truncate text-center">
+                              {photo.name || `Photo ${idx + 1}`}
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Delay Notice Banner if active */}
+                {wo.resolution_notes?.includes("[DELAY NOTICE") && (
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-900 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                    <span className="font-medium">{wo.resolution_notes}</span>
+                  </div>
+                )}
+
                 {/* Action Area based on status */}
                 <div className="pt-2 border-t border-neutral-100 flex flex-wrap items-center justify-between gap-2">
+                  {wo.status !== "completed" && (
+                    <button
+                      onClick={() => {
+                        setDelayWo(wo);
+                        setDelayMinutes(30);
+                        setDelayReason("Heavy Traffic / Road Congestion");
+                        setDelayNotes("");
+                        setDelayEta("");
+                        setDelayError(null);
+                        setDelaySuccessMsg(null);
+                      }}
+                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 flex items-center gap-1.5 transition shadow-xs"
+                    >
+                      <Clock className="h-3.5 w-3.5 text-amber-600" />
+                      Notify Delay / Running Late
+                    </button>
+                  )}
+
                   {wo.status === "assigned" && (
-                    <div className="flex items-center gap-2 w-full justify-end">
+                    <div className="flex items-center gap-2 ml-auto">
                       <button
                         onClick={() => setRejectingWo(wo)}
                         className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
@@ -321,7 +454,7 @@ function TechnicianOverview() {
                   )}
 
                   {wo.status === "accepted" && (
-                    <div className="flex items-center gap-2 w-full justify-end">
+                    <div className="flex items-center gap-2 ml-auto">
                       <button
                         onClick={() => handleStageTransition(wo.id, "travel", "in_progress")}
                         className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700 flex items-center gap-1.5"
@@ -333,7 +466,7 @@ function TechnicianOverview() {
                   )}
 
                   {wo.status === "en_route" && (
-                    <div className="flex items-center gap-2 w-full justify-end">
+                    <div className="flex items-center gap-2 ml-auto">
                       <button
                         onClick={() => handleStageTransition(wo.id, "arrival_checkin", "completed")}
                         className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-700 flex items-center gap-1.5"
@@ -345,7 +478,7 @@ function TechnicianOverview() {
                   )}
 
                   {wo.status === "on_site" && (
-                    <div className="flex items-center gap-2 w-full justify-end">
+                    <div className="flex items-center gap-2 ml-auto">
                       <button
                         onClick={() => handleStageTransition(wo.id, "execution", "in_progress")}
                         className="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white shadow hover:bg-amber-700 flex items-center gap-1.5"
@@ -357,7 +490,7 @@ function TechnicianOverview() {
                   )}
 
                   {wo.status === "in_progress" && (
-                    <div className="flex items-center gap-2 w-full justify-end">
+                    <div className="flex items-center gap-2 ml-auto">
                       <button
                         onClick={() => handleStageTransition(wo.id, "checkout", "completed")}
                         className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-700 flex items-center gap-1.5"
@@ -369,7 +502,7 @@ function TechnicianOverview() {
                   )}
 
                   {wo.status === "completed" && (
-                    <div className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
+                    <div className="text-xs text-emerald-700 font-semibold flex items-center gap-1 ml-auto">
                       <CheckCircle2 className="h-4 w-4" />
                       Service completed and verified
                     </div>
@@ -446,6 +579,147 @@ function TechnicianOverview() {
                 Confirm Decline
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* NOTIFY DELAY / RUNNING LATE MODAL */}
+      {delayWo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-neutral-900 flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-amber-500" />
+                  Report Schedule Delay: {delayWo.work_order_number}
+                </h2>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Alert the fleet operator and customer with your updated arrival window
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setDelayWo(null);
+                  setDelayError(null);
+                }}
+                className="rounded p-1 text-neutral-400 hover:bg-neutral-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {delaySuccessMsg && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>{delaySuccessMsg}</span>
+              </div>
+            )}
+
+            {delayError && (
+              <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                <span>{delayError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleNotifyDelay} className="space-y-4">
+              {/* Quick Delay Chips */}
+              <div>
+                <label className="text-xs font-semibold text-neutral-700 block mb-1.5">
+                  Estimated Delay Duration
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[15, 30, 45, 60, 90, 120].map((mins) => (
+                    <button
+                      type="button"
+                      key={mins}
+                      onClick={() => setDelayMinutes(mins)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                        delayMinutes === mins
+                          ? "bg-amber-600 text-white shadow-xs"
+                          : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+                      }`}
+                    >
+                      +{mins >= 60 ? `${mins / 60}h` : `${mins}m`}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center gap-2 text-xs text-neutral-500">
+                  <span>Or exact minutes:</span>
+                  <input
+                    type="number"
+                    min={5}
+                    max={480}
+                    value={delayMinutes}
+                    onChange={(e) => setDelayMinutes(Number(e.target.value))}
+                    className="w-24 rounded-lg border border-neutral-300 px-2 py-1 text-xs font-bold text-neutral-900"
+                  />
+                </div>
+              </div>
+
+              {/* Delay Reason Selector */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 block">
+                  Reason for Delay <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={delayReason}
+                  onChange={(e) => setDelayReason(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-xs bg-white text-neutral-900"
+                >
+                  {DELAY_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Revised ETA Input */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 block">
+                  New Estimated Arrival Time (ETA)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 15:45 or in 40 minutes"
+                  value={delayEta}
+                  onChange={(e) => setDelayEta(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-xs text-neutral-900"
+                />
+              </div>
+
+              {/* Additional Notes */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 block">
+                  Notes / Explanation (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Encountered road closure on highway, taking detour via Ring Road..."
+                  value={delayNotes}
+                  onChange={(e) => setDelayNotes(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-xs text-neutral-900"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-neutral-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setDelayWo(null)}
+                  className="rounded-lg border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDelaySubmitting}
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isDelaySubmitting ? "Notifying..." : "Broadcast Delay Notification"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

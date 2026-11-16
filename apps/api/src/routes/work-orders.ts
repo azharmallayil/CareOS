@@ -24,6 +24,13 @@ const serviceVisitSchema = z.object({
   customerPresentName: z.string().max(100).optional(),
 });
 
+const notifyDelaySchema = z.object({
+  delayMinutes: z.number().int().min(5).max(480),
+  delayReason: z.string().min(2).max(100),
+  notes: z.string().max(1000).optional(),
+  newEta: z.string().optional(),
+});
+
 export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
   const supabaseUrl = process.env["SUPABASE_URL"];
   const supabaseServiceKey = process.env["SUPABASE_SERVICE_ROLE_KEY"];
@@ -87,7 +94,15 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
           actual_checkin_at,
           actual_checkout_at,
           created_at,
-          ticket:tickets(id, ticket_number, title),
+          ticket:tickets(
+            id,
+            ticket_number,
+            title,
+            description,
+            priority,
+            status,
+            events:ticket_events(id, event_type, body, attachments, actor_type, created_at)
+          ),
           technician:technicians(id, full_name, email, phone),
           customer:customer_accounts(id, name, account_number),
           site:customer_sites(id, name, city, address_line1, latitude, longitude),
@@ -376,7 +391,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
         ticketStatus = "in_progress";
       } else if (stage === "checkout" && status === "completed") {
         woStatus = "completed";
-        ticketStatus = "service_completed";
+        ticketStatus = "awaiting_customer_confirmation";
         await adminClient
           .from("work_orders")
           .update({ actual_checkout_at: new Date().toISOString() })
@@ -396,6 +411,11 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
           .update({ status: ticketStatus, updated_at: new Date().toISOString() })
           .eq("id", updatedWo.ticket_id);
 
+        const eventMessage =
+          stage === "checkout" && status === "completed"
+            ? `Work Order ${updatedWo.work_order_number} completed by technician. Service is now awaiting customer review, star rating & sign-off.`
+            : `Work Order ${updatedWo.work_order_number} stage '${stage}' transitioned to ${status}. Status: ${woStatus.replace(/_/g, " ")}.`;
+
         await adminClient.from("ticket_events").insert({
           tenant_id: tenantId,
           ticket_id: updatedWo.ticket_id,
@@ -403,7 +423,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
           actor_role: "technician",
           event_type: `stage_${stage}_${status}`,
           is_internal: false,
-          body: `Work Order ${updatedWo.work_order_number} stage '${stage}' transitioned to ${status}. Status: ${woStatus.replace(/_/g, " ")}.`,
+          body: eventMessage,
         });
       }
 
@@ -463,6 +483,97 @@ export const workOrderRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       return reply.status(201).send({ visit });
+    }
+  );
+
+  // POST /api/v1/work-orders/:id/notify-delay
+  fastify.post<{ Params: { id: string } }>(
+    "/:id/notify-delay",
+    { preHandler: [requireAuth, requireTenant] },
+    async (request, reply) => {
+      const tenantId = request.auth?.activeTenantId;
+      const userId = request.auth?.user.id;
+      const { id } = request.params;
+
+      if (!tenantId || !userId || !adminClient) {
+        return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Unauthorized" } });
+      }
+
+      const parsed = notifyDelaySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: { code: "VALIDATION_ERROR", details: parsed.error.format() } });
+      }
+
+      const { delayMinutes, delayReason, notes, newEta } = parsed.data;
+
+      const { data: wo, error: woErr } = await adminClient
+        .from("work_orders")
+        .select(`
+          id,
+          work_order_number,
+          ticket_id,
+          technician_id,
+          scheduled_date,
+          scheduled_window_start,
+          scheduled_window_end,
+          technician:technicians(id, full_name, phone)
+        `)
+        .eq("tenant_id", tenantId)
+        .eq("id", id)
+        .maybeSingle();
+
+      if (woErr || !wo) {
+        return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Work order not found" } });
+      }
+
+      const techName = (wo as any).technician?.full_name || "Field Technician";
+      const nowIso = new Date().toISOString();
+
+      const delayNotice = `⚠️ DELAY NOTICE: Technician ${techName} reported a delay of +${delayMinutes} minutes.\nReason: ${delayReason}${newEta ? `\nNew Estimated Arrival (ETA): ${newEta}` : ""}${notes ? `\nNotes: "${notes}"` : ""}`;
+
+      // 1. Record on ticket timeline (public so both customer & fleet company see it)
+      await adminClient.from("ticket_events").insert({
+        tenant_id: tenantId,
+        ticket_id: wo.ticket_id,
+        actor_id: userId,
+        actor_role: "technician",
+        event_type: "comment",
+        is_internal: false,
+        body: delayNotice,
+        metadata: {
+          delay_minutes: delayMinutes,
+          delay_reason: delayReason,
+          new_eta: newEta,
+          notes,
+          reported_at: nowIso,
+          is_delay_notice: true,
+        },
+      });
+
+      // 2. Update work order with delay notice
+      await adminClient
+        .from("work_orders")
+        .update({
+          resolution_notes: `[DELAY NOTICE +${delayMinutes}m: ${delayReason}]`,
+          updated_at: nowIso,
+        })
+        .eq("id", id);
+
+      // 3. Create notifications for operations and customer
+      await adminClient.from("notifications").insert({
+        tenant_id: tenantId,
+        recipient_id: userId,
+        title: `Technician Delayed: ${wo.work_order_number} (+${delayMinutes}m)`,
+        body: delayNotice,
+        category: "status_change",
+        link_url: `/operations/dispatch`,
+      });
+
+      return reply.send({
+        success: true,
+        message: `Delay notice posted successfully. Fleet operators and customer notified.`,
+        delayNotice,
+      });
     }
   );
 };

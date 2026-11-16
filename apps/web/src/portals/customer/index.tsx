@@ -27,6 +27,13 @@ import {
   ChevronRight,
   ShieldAlert,
   CreditCard,
+  Star,
+  Upload,
+  Image,
+  X,
+  Check,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 
 interface LinkedAccount {
@@ -90,6 +97,7 @@ function CustomerOverview() {
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [ticketPhotos, setTicketPhotos] = useState<Array<{ name: string; url: string; size?: number; type?: string }>>([]);
   const [newTicketForm, setNewTicketForm] = useState({
     customerAccountId: "",
     categoryId: "",
@@ -105,6 +113,17 @@ function CustomerOverview() {
   const [isLoadingTicketDetail, setIsLoadingTicketDetail] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [isPostingComment, setIsPostingComment] = useState(false);
+
+  // Customer Approval & Sign-Off State
+  const [approvalRating, setApprovalRating] = useState<number>(5);
+  const [approvalFeedback, setApprovalFeedback] = useState<string>("");
+  const [approvalPhotos, setApprovalPhotos] = useState<Array<{ name: string; url: string; size?: number; type?: string }>>([]);
+  const [approvalSignature, setApprovalSignature] = useState<string>("");
+  const [isApprovalSubmitting, setIsApprovalSubmitting] = useState(false);
+  const [reworkPromptOpen, setReworkPromptOpen] = useState(false);
+  const [reworkReason, setReworkReason] = useState("");
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalSuccessMsg, setApprovalSuccessMsg] = useState<string | null>(null);
 
   const tenantId = authContext?.activeTenantId;
   const token = session?.access_token;
@@ -218,6 +237,80 @@ function CustomerOverview() {
     }
   };
 
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, target: "ticket" | "approval") => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        if (result) {
+          const photoObj = {
+            name: file.name,
+            url: result,
+            size: file.size,
+            type: file.type,
+          };
+          if (target === "ticket") {
+            setTicketPhotos((prev) => [...prev, photoObj]);
+          } else {
+            setApprovalPhotos((prev) => [...prev, photoObj]);
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleSubmitApproval = async (decision: "approve" | "reject") => {
+    if (!token || !tenantId || !selectedTicket) return;
+    if (decision === "reject" && !reworkReason.trim()) {
+      setApprovalError("Please provide a reason for requesting rework.");
+      return;
+    }
+
+    setIsApprovalSubmitting(true);
+    setApprovalError(null);
+    setApprovalSuccessMsg(null);
+
+    try {
+      const res = await fetch(`/api/v1/tickets/${selectedTicket.id}/customer-approval`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-ID": tenantId,
+          "X-Portal": "customer",
+        },
+        body: JSON.stringify({
+          decision,
+          rating: decision === "approve" ? approvalRating : undefined,
+          feedback: decision === "approve" ? approvalFeedback.trim() : undefined,
+          photos: approvalPhotos,
+          reworkReason: decision === "reject" ? reworkReason.trim() : undefined,
+          customerSignatureName: approvalSignature.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error?.message || "Failed to submit customer approval");
+      }
+
+      setApprovalSuccessMsg(data.message || (decision === "approve" ? "Service approved and submitted to fleet company!" : "Rework requested successfully."));
+      setReworkPromptOpen(false);
+      setReworkReason("");
+      setApprovalPhotos([]);
+      setApprovalFeedback("");
+      handleOpenTicketDetail(selectedTicket.id);
+      fetchData();
+    } catch (err: any) {
+      setApprovalError(err.message || "Failed to submit approval");
+    } finally {
+      setIsApprovalSubmitting(false);
+    }
+  };
+
   const handleCreateServiceRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !tenantId) return;
@@ -251,6 +344,7 @@ function CustomerOverview() {
         priority: newTicketForm.priority,
         coverageType: "paid",
         reportedVia: "portal",
+        attachments: ticketPhotos,
       };
 
       if (newTicketForm.assetId) {
@@ -273,6 +367,7 @@ function CustomerOverview() {
       }
 
       setIsNewTicketOpen(false);
+      setTicketPhotos([]);
       setNewTicketForm({
         customerAccountId: linkedAccounts[0]?.id || "",
         categoryId: categories[0]?.id || "",
@@ -556,6 +651,48 @@ function CustomerOverview() {
             />
           </div>
 
+          {/* Photo & Evidence Attachment Dropzone */}
+          <div>
+            <label className="block text-xs font-semibold text-neutral-700 mb-1">
+              Attach Photos / Issue Evidence (Optional)
+            </label>
+            <div className="rounded-xl border-2 border-dashed border-neutral-300 p-4 text-center hover:border-blue-500 transition-colors bg-neutral-50/50">
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                id="ticket-photo-input"
+                className="hidden"
+                onChange={(e) => handlePhotoUpload(e, "ticket")}
+              />
+              <label htmlFor="ticket-photo-input" className="cursor-pointer flex flex-col items-center gap-1.5">
+                <Upload className="h-6 w-6 text-neutral-400" />
+                <span className="text-xs font-semibold text-blue-600 hover:underline">
+                  Click to upload photos
+                </span>
+                <span className="text-[11px] text-neutral-400">
+                  Upload dashboard warnings, physical damage, leaks, or telematics device photos (PNG, JPG)
+                </span>
+              </label>
+            </div>
+            {ticketPhotos.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {ticketPhotos.map((p, idx) => (
+                  <div key={idx} className="relative group rounded-lg overflow-hidden border border-neutral-200 w-16 h-16 bg-neutral-100">
+                    <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setTicketPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                      className="absolute top-0.5 right-0.5 bg-black/70 hover:bg-red-600 text-white rounded-full p-0.5"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-200">
             <button
               type="button"
@@ -606,12 +743,235 @@ function CustomerOverview() {
               )}
             </div>
 
+            {/* Delay Alert Banner */}
+            {selectedTicketEvents.some((ev) => ev.metadata?.is_delay_notice || ev.body?.includes("DELAY NOTICE")) && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-start gap-2.5 text-xs text-amber-900 shadow-xs">
+                <Clock className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-amber-950 uppercase tracking-wider text-[10px] bg-amber-200/60 px-1.5 py-0.5 rounded">
+                    Technician Schedule Delay Notice
+                  </span>
+                  <p className="mt-1 text-amber-900 whitespace-pre-wrap font-medium">
+                    {selectedTicketEvents.filter((ev) => ev.metadata?.is_delay_notice || ev.body?.includes("DELAY NOTICE")).slice(-1)[0]?.body}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div>
               <h4 className="text-xs font-semibold uppercase text-neutral-400 mb-1">Problem Description</h4>
               <p className="text-xs text-neutral-800 bg-neutral-50 p-3 rounded border border-neutral-100 whitespace-pre-wrap">
                 {selectedTicket.description}
               </p>
             </div>
+
+            {/* Photos & Evidence Gallery */}
+            {(() => {
+              const allPhotos = selectedTicketEvents
+                .flatMap((ev) => (Array.isArray(ev.attachments) ? ev.attachments : []))
+                .filter((att) => att && (att.url || typeof att === "string"));
+              if (allPhotos.length === 0) return null;
+              return (
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50/60 p-3 space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                    <Image className="h-3.5 w-3.5 text-blue-600" />
+                    Issue & Evidence Photos ({allPhotos.length})
+                  </h4>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {allPhotos.map((photo: any, idx: number) => {
+                      const photoUrl = photo.url || photo;
+                      const photoName = photo.name || `Photo #${idx + 1}`;
+                      return (
+                        <a
+                          key={idx}
+                          href={photoUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="relative group rounded-lg overflow-hidden border border-neutral-200 aspect-video bg-neutral-100 hover:border-blue-500 shadow-2xs block"
+                        >
+                          <img src={photoUrl} alt={photoName} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-[10px] font-bold">
+                            View Full Photo
+                          </div>
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ACTION REQUIRED: Customer Approval & Sign-Off Card */}
+            {selectedTicket.status === "awaiting_customer_confirmation" && (
+              <div className="rounded-2xl border-2 border-blue-500/30 bg-blue-50/40 p-4 sm:p-5 space-y-4 shadow-xs">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-blue-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                      Action Required
+                    </span>
+                    <span className="text-xs font-bold text-blue-900">Sign-Off & Quality Rating</span>
+                  </div>
+                  <h3 className="text-sm font-bold text-neutral-900 mt-1 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    Field Technician Finished Work — Review & Approve
+                  </h3>
+                  <p className="text-xs text-neutral-600 mt-0.5">
+                    The assigned technician completed service on your vehicle/asset. Please review the vehicle, rate the service quality, and submit your sign-off to the fleet company.
+                  </p>
+                </div>
+
+                {/* Star Rating */}
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1.5">
+                    Service Quality Rating (1 to 5 Stars) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setApprovalRating(star)}
+                        className={`p-1 rounded transition-transform hover:scale-110 ${
+                          star <= approvalRating ? "text-amber-400" : "text-neutral-300"
+                        }`}
+                      >
+                        <Star className={`h-6 w-6 ${star <= approvalRating ? "fill-amber-400 text-amber-500" : ""}`} />
+                      </button>
+                    ))}
+                    <span className="ml-2 text-xs font-bold text-neutral-700">
+                      {approvalRating === 5 && "★★★★★ 5 - Excellent (Outstanding Service)"}
+                      {approvalRating === 4 && "★★★★☆ 4 - Very Good (Satisfied)"}
+                      {approvalRating === 3 && "★★★☆☆ 3 - Good / Satisfactory"}
+                      {approvalRating === 2 && "★★☆☆☆ 2 - Fair / Minor Issues"}
+                      {approvalRating === 1 && "★☆☆☆☆ 1 - Poor / Unsatisfactory"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Text Feedback */}
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Customer Feedback & Notes
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={approvalFeedback}
+                    onChange={(e) => setApprovalFeedback(e.target.value)}
+                    placeholder="Share feedback on technician cleanliness, fix accuracy, and vehicle condition..."
+                    className="w-full rounded-lg border border-neutral-300 bg-white p-2.5 text-xs text-neutral-900 placeholder:text-neutral-400 focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                {/* Inspection Photos Upload */}
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Upload Inspection / Post-Service Photos (Optional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    id="approval-photo-input"
+                    className="hidden"
+                    onChange={(e) => handlePhotoUpload(e, "approval")}
+                  />
+                  <label
+                    htmlFor="approval-photo-input"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 cursor-pointer shadow-xs"
+                  >
+                    <Upload className="h-3.5 w-3.5 text-neutral-500" />
+                    Upload Work Photos
+                  </label>
+                  {approvalPhotos.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {approvalPhotos.map((p, idx) => (
+                        <div key={idx} className="relative rounded border border-neutral-200 w-12 h-12 overflow-hidden bg-neutral-100">
+                          <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setApprovalPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                            className="absolute top-0 right-0 bg-black/70 hover:bg-red-600 text-white rounded-full p-0.5"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Signature Name */}
+                <div>
+                  <label className="block text-xs font-bold text-neutral-800 mb-1">
+                    Authorized Sign-Off Name
+                  </label>
+                  <input
+                    type="text"
+                    value={approvalSignature}
+                    onChange={(e) => setApprovalSignature(e.target.value)}
+                    placeholder="e.g. Tariq Al-Mansoor (Fleet Manager)"
+                    className="w-full sm:w-72 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-900 focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-blue-200/60">
+                  <button
+                    type="button"
+                    onClick={() => setReworkPromptOpen(!reworkPromptOpen)}
+                    className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                  >
+                    {reworkPromptOpen ? "Cancel Rework Request" : "Request Rework / Issue Not Fixed"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isApprovalSubmitting}
+                    onClick={() => handleSubmitApproval("approve")}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    {isApprovalSubmitting ? "Submitting..." : "Approve & Submit to Fleet Operator"}
+                  </button>
+                </div>
+
+                {/* Rework Reason Box */}
+                {reworkPromptOpen && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3 space-y-2 mt-2">
+                    <label className="block text-xs font-bold text-rose-900">
+                      Reason for Rejecting / Rework Needed <span className="text-rose-600">*</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={reworkReason}
+                      onChange={(e) => setReworkReason(e.target.value)}
+                      placeholder="Explain what is still not functioning or why work cannot be signed off..."
+                      className="w-full rounded border border-rose-300 bg-white p-2 text-xs text-neutral-900 focus:outline-none"
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={isApprovalSubmitting || !reworkReason.trim()}
+                        onClick={() => handleSubmitApproval("reject")}
+                        className="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
+                      >
+                        Submit Rework Request to Fleet
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {approvalError && <p className="text-xs font-semibold text-rose-600">{approvalError}</p>}
+                {approvalSuccessMsg && <p className="text-xs font-semibold text-emerald-600">{approvalSuccessMsg}</p>}
+              </div>
+            )}
+
+            {/* Approved & Submitted Badge */}
+            {(selectedTicket.status === "awaiting_operations_verification" || selectedTicket.status === "resolved") && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 flex items-center gap-2 text-xs text-emerald-900 font-semibold">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                Service approved by customer and submitted to fleet company for final verification.
+              </div>
+            )}
 
             {selectedTicket.resolution_summary && (
               <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">

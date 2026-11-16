@@ -34,6 +34,11 @@ import {
   Navigation,
   CheckSquare,
   Layers,
+  Image,
+  ThumbsUp,
+  ThumbsDown,
+  ExternalLink,
+  X,
 } from "lucide-react";
 
 export interface RecommendationItem {
@@ -173,6 +178,8 @@ export interface TicketDetailData {
     actor_type: string;
     is_internal: boolean;
     body: string;
+    attachments?: Array<{ name: string; url?: string; dataUrl?: string; type?: string; size?: number }>;
+    metadata?: Record<string, any>;
     created_at: string;
   }>;
   complaints: Array<{
@@ -474,6 +481,11 @@ export function TicketDetailView() {
       case "on_hold":
         return <Badge variant="neutral">On Hold</Badge>;
       case "service_completed":
+        return <Badge variant="info">Service Completed</Badge>;
+      case "awaiting_customer_confirmation":
+        return <Badge variant="warning" dot>Awaiting Customer Sign-Off</Badge>;
+      case "awaiting_operations_verification":
+        return <Badge variant="primary" dot>Awaiting Ops Verification</Badge>;
       case "resolved":
         return <Badge variant="success">Resolved</Badge>;
       case "closed":
@@ -547,7 +559,18 @@ export function TicketDetailView() {
       transitionOptions.push({ target: "cancelled", label: "Cancel Ticket", variant: "error" });
       break;
     case "service_completed":
+      transitionOptions.push({ target: "awaiting_customer_confirmation", label: "Send for Customer Sign-Off", variant: "primary" });
+      transitionOptions.push({ target: "awaiting_operations_verification", label: "Move to Ops Verification", variant: "warning" });
       transitionOptions.push({ target: "resolved", label: "Resolve Ticket", variant: "success" });
+      break;
+    case "awaiting_customer_confirmation":
+      transitionOptions.push({ target: "awaiting_operations_verification", label: "Ops Override Verification", variant: "primary" });
+      transitionOptions.push({ target: "resolved", label: "Force Resolve", variant: "success" });
+      transitionOptions.push({ target: "in_progress", label: "Reopen for Work", variant: "warning" });
+      break;
+    case "awaiting_operations_verification":
+      transitionOptions.push({ target: "resolved", label: "Approve & Resolve Ticket", variant: "success" });
+      transitionOptions.push({ target: "under_review", label: "Reject / Return to Review", variant: "error" });
       transitionOptions.push({ target: "in_progress", label: "Reopen for Work", variant: "warning" });
       break;
     case "resolved":
@@ -639,6 +662,43 @@ export function TicketDetailView() {
         </div>
       </div>
 
+      {/* Technician Delay Alert Banner */}
+      {(() => {
+        const delayEvent = ticket.events?.find(
+          (ev) => ev.metadata?.is_delay_notice || ev.body?.includes("⚠️ DELAY NOTICE:")
+        );
+        if (!delayEvent) return null;
+        return (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-4 shadow-sm flex items-start gap-3.5">
+            <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-amber-950 uppercase tracking-wide text-sm">
+                  Technician Schedule Delay Reported (+{delayEvent.metadata?.delay_minutes || 30} min)
+                </span>
+                <Badge variant="warning">Schedule Shift</Badge>
+              </div>
+              <p className="mt-1 text-amber-900 font-medium">
+                <strong>Reason:</strong> {delayEvent.metadata?.delay_reason || "Travel / Work Delay"}
+              </p>
+              {delayEvent.metadata?.new_eta && (
+                <p className="mt-0.5 text-amber-950 font-semibold">
+                  <strong>Revised ETA:</strong> {delayEvent.metadata.new_eta}
+                </p>
+              )}
+              {delayEvent.metadata?.notes && (
+                <p className="mt-1 text-amber-800 italic bg-amber-100/60 p-2 rounded-lg border border-amber-200">
+                  "{delayEvent.metadata.notes}"
+                </p>
+              )}
+              <p className="mt-1 text-[11px] text-amber-700">
+                Reported {new Date(delayEvent.created_at).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left Column (2 Cols): Details & Activity */}
@@ -675,6 +735,178 @@ export function TicketDetailView() {
               </div>
             )}
           </Card>
+
+          {/* Customer Attached Photos & Issue Evidence */}
+          {(() => {
+            const issuePhotos = (ticket.events || [])
+              .filter(
+                (ev) =>
+                  ev.event_type !== "customer_signoff_approved" &&
+                  ev.event_type !== "customer_signoff_rejected"
+              )
+              .flatMap((ev) => (Array.isArray(ev.attachments) ? ev.attachments : []));
+
+            if (issuePhotos.length === 0) return null;
+
+            return (
+              <Card className="p-5">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-3 flex items-center gap-2">
+                  <Image className="h-4 w-4 text-blue-600" />
+                  Customer Attached Issue Photos & Evidence ({issuePhotos.length})
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {issuePhotos.map((photo: any, idx: number) => (
+                    <a
+                      key={idx}
+                      href={photo.url || photo.dataUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group relative block aspect-video rounded-xl overflow-hidden border border-neutral-200 bg-neutral-100 hover:border-blue-500 shadow-xs transition"
+                    >
+                      <img
+                        src={photo.url || photo.dataUrl}
+                        alt={photo.name || `Photo ${idx + 1}`}
+                        className="h-full w-full object-cover group-hover:scale-105 transition duration-200"
+                      />
+                      <span className="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-xs text-white text-[11px] px-2 py-1 truncate text-center font-medium">
+                        {photo.name || `Photo ${idx + 1}`}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </Card>
+            );
+          })()}
+
+          {/* Customer Work Sign-Off & Satisfaction Rating */}
+          {(() => {
+            const signoffEvent = ticket.events?.find(
+              (ev) =>
+                ev.event_type === "customer_signoff_approved" ||
+                ev.event_type === "customer_signoff_rejected"
+            );
+
+            if (signoffEvent) {
+              const isApproved = signoffEvent.event_type === "customer_signoff_approved";
+              const rating = signoffEvent.metadata?.rating;
+              const feedback = signoffEvent.metadata?.feedback;
+              const reworkReason = signoffEvent.metadata?.rework_reason;
+              const signature = signoffEvent.metadata?.customer_signature_name;
+              const signoffPhotos = Array.isArray(signoffEvent.attachments)
+                ? signoffEvent.attachments
+                : [];
+
+              return (
+                <Card
+                  className={`p-5 border ${
+                    isApproved
+                      ? "border-emerald-200 bg-gradient-to-br from-emerald-50/50 to-white"
+                      : "border-rose-200 bg-gradient-to-br from-rose-50/50 to-white"
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-neutral-100 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div
+                        className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-white shadow-xs ${
+                          isApproved ? "bg-emerald-600" : "bg-rose-600"
+                        }`}
+                      >
+                        {isApproved ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                      </div>
+                      <div>
+                        <h2 className="text-sm font-bold text-neutral-900">
+                          Customer Work Verification: {isApproved ? "Approved & Verified" : "Rework Requested"}
+                        </h2>
+                        <p className="text-xs text-neutral-500">
+                          Logged at {new Date(signoffEvent.created_at).toLocaleString()}
+                          {signature ? ` by ${signature}` : ""}
+                        </p>
+                      </div>
+                    </div>
+
+                    {rating && (
+                      <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+                        <span className="text-xs font-bold text-amber-900 mr-1">{rating}.0</span>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            className={`h-4 w-4 ${
+                              star <= rating
+                                ? "text-amber-400 fill-amber-400"
+                                : "text-neutral-200"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {feedback && (
+                    <div className="mt-3 text-xs text-neutral-800 bg-white/80 p-3 rounded-lg border border-neutral-200/80">
+                      <span className="font-semibold text-neutral-700 block mb-0.5">Customer Feedback:</span>
+                      <p className="italic leading-relaxed">"{feedback}"</p>
+                    </div>
+                  )}
+
+                  {reworkReason && (
+                    <div className="mt-3 text-xs text-rose-900 bg-rose-50 p-3 rounded-lg border border-rose-200">
+                      <span className="font-semibold text-rose-800 block mb-0.5">Rework Reason:</span>
+                      <p>{reworkReason}</p>
+                    </div>
+                  )}
+
+                  {signoffPhotos.length > 0 && (
+                    <div className="mt-3 space-y-1.5">
+                      <span className="text-xs font-semibold text-neutral-700 block">
+                        Customer Inspection Photos ({signoffPhotos.length}):
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {signoffPhotos.map((photo: any, idx: number) => (
+                          <a
+                            key={idx}
+                            href={photo.url || photo.dataUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group relative block aspect-video rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 hover:border-blue-400 transition"
+                          >
+                            <img
+                              src={photo.url || photo.dataUrl}
+                              alt={photo.name || `Inspection Photo ${idx + 1}`}
+                              className="h-full w-full object-cover group-hover:scale-105 transition"
+                            />
+                            <span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[10px] px-1.5 py-0.5 truncate text-center">
+                              {photo.name || `Photo ${idx + 1}`}
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              );
+            }
+
+            if (ticket.status === "awaiting_customer_confirmation") {
+              return (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-amber-600 shrink-0 animate-pulse" />
+                    <div>
+                      <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wide">
+                        Awaiting Customer Approval & Sign-Off
+                      </h3>
+                      <p className="text-xs text-amber-800">
+                        Technician completed the service checkout. The customer has been invited to review, rate (1-5 stars), and approve the work.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="warning">In Review</Badge>
+                </div>
+              );
+            }
+
+            return null;
+          })()}
 
           {/* Activity Stream & Notes Card */}
           <Card className="p-5">
@@ -746,6 +978,29 @@ export function TicketDetailView() {
                       </div>
                     </div>
                     <p className="whitespace-pre-wrap text-xs sm:text-sm">{event.body}</p>
+
+                    {event.attachments && event.attachments.length > 0 && (
+                      <div className="mt-2.5 pt-2 border-t border-neutral-100 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {event.attachments.map((photo: any, aIdx: number) => (
+                          <a
+                            key={aIdx}
+                            href={photo.url || photo.dataUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group relative block aspect-video rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 hover:border-blue-500 transition shadow-xs"
+                          >
+                            <img
+                              src={photo.url || photo.dataUrl}
+                              alt={photo.name || `Attachment ${aIdx + 1}`}
+                              className="h-full w-full object-cover group-hover:scale-105 transition duration-200"
+                            />
+                            <span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[10px] px-1.5 py-0.5 truncate text-center">
+                              {photo.name || `Photo ${aIdx + 1}`}
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))
               )}

@@ -76,15 +76,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const response = await fetch("/api/v1/auth/me", {
-        headers: {
-          Authorization: `Bearer ${currentSession.access_token}`,
-        },
-      });
+      let apiPayload: any = null;
+      try {
+        const response = await fetch("/api/v1/auth/me", {
+          headers: {
+            Authorization: `Bearer ${currentSession.access_token}`,
+          },
+        });
 
-      if (response.ok) {
-        const payload = await response.json();
-        setAuthContext(payload.data);
+        const contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          apiPayload = await response.json();
+        }
+      } catch (netErr) {
+        console.warn("API server unavailable for /auth/me, using direct Supabase queries", netErr);
+      }
+
+      if (apiPayload?.data) {
+        setAuthContext(apiPayload.data);
       } else {
         const client = getSupabaseForPortal(portal);
 
@@ -231,10 +240,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ tenantId }),
       });
 
-      if (response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.includes("application/json")) {
         const payload = await response.json();
-        setAuthContext(payload.data);
-        return true;
+        if (payload?.data) {
+          setAuthContext(payload.data);
+          return true;
+        }
       }
     } catch {
       // Fallback local switch
